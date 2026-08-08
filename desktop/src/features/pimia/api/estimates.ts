@@ -17,6 +17,7 @@ import {
   PimiaApiError,
   pimiaRequest,
   derivePagination,
+  readCompanyCount,
   readPagination,
   unwrapItem,
   unwrapList,
@@ -52,8 +53,22 @@ export type PimiaEstimate = {
 export type PimiaEstimatePage = {
   estimates: PimiaEstimate[];
   pagination: PimiaPagination | null;
+  /** Los que casan con el filtro actual: el `total` del paginador. */
   totalCount: number | null;
+  /** Todos los del tenant, ignorando el filtro. Ver `readCompanyCount`. */
+  companyTotalCount: number | null;
 };
+
+/** Campos por los que el índice sabe ordenar (`orderByField` de la API). */
+export const ESTIMATE_SORT_FIELDS = [
+  "estimate_date",
+  "expiry_date",
+  "estimate_number",
+  "status",
+  "total",
+] as const;
+
+export type PimiaEstimateSortField = (typeof ESTIMATE_SORT_FIELDS)[number];
 
 type RawEstimate = Record<string, unknown>;
 
@@ -87,11 +102,20 @@ export type ListEstimatesInput = {
   search?: string;
   customerId?: string;
   status?: PimiaEstimateStatus;
+  /** `YYYY-MM-DD`. La API exige las dos o ninguna. */
+  fromDate?: string;
+  toDate?: string;
+  orderByField?: PimiaEstimateSortField;
+  orderBy?: "asc" | "desc";
 };
 
 export async function listEstimates(
   input: ListEstimatesInput = {},
 ): Promise<PimiaEstimatePage> {
+  // `from_date`/`to_date` van juntas o no van: el servidor solo entra en el
+  // filtro de rango si tiene las dos, y con una sola las ignoraría en silencio.
+  const hasRange = Boolean(input.fromDate && input.toDate);
+
   const payload = await pimiaRequest<unknown>({
     path: "/estimates",
     query: {
@@ -100,26 +124,26 @@ export async function listEstimates(
       search: input.search?.trim() || undefined,
       customer_id: input.customerId,
       status: input.status,
+      from_date: hasRange ? input.fromDate : undefined,
+      to_date: hasRange ? input.toDate : undefined,
+      orderByField: input.orderByField,
+      orderBy: input.orderByField ? (input.orderBy ?? "desc") : undefined,
     },
   });
 
-  const meta =
-    typeof payload === "object" && payload !== null
-      ? ((payload as { meta?: Record<string, unknown> }).meta ?? {})
-      : {};
-  const totalCount = meta.estimate_total_count;
-
-  const resolvedTotal = typeof totalCount === "number" ? totalCount : null;
+  const companyTotalCount = readCompanyCount(payload, "estimate_total_count");
+  const pagination = derivePagination(
+    readPagination(payload),
+    companyTotalCount,
+    input.page,
+    input.limit,
+  );
 
   return {
     estimates: unwrapList<RawEstimate>(payload).map(normalizeEstimate),
-    pagination: derivePagination(
-      readPagination(payload),
-      resolvedTotal,
-      input.page,
-      input.limit,
-    ),
-    totalCount: resolvedTotal,
+    pagination,
+    totalCount: pagination?.total ?? companyTotalCount,
+    companyTotalCount,
   };
 }
 

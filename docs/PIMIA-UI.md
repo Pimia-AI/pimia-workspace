@@ -21,21 +21,44 @@ sobre las vistas de la Fase 1 y antes de replicar más módulos.
 
 ## La anatomía de una lista
 
-De arriba abajo, y en este orden:
+La referencia concreta es su **`invoice-list-2`** (👤 fundador: «la podemos
+aprovechar para el listado de facturas»). De arriba abajo, y en este orden:
 
 1. **Cabecera** — título, descripción de una línea, acción primaria a la
    derecha.
-2. **Pestañas de estado** — la partición natural del listado, subrayadas.
-3. **Fila de filtros** — búsqueda (rebotada, contra la API) y el resto de
-   filtros.
-4. **Tabla densa** — dentro de un marco `rounded-lg border`: cabeceras
-   apagadas de 40 px, filas de 49 px, importes a la derecha en `tabular-nums`,
-   estado como insignia semántica.
-5. **Pie** — el total en pantalla cuando hay dinero, y el recuento con la
-   navegación de páginas.
+2. **Tira de cifras** — cuatro recuentos en una caja dividida, que es lo que
+   contesta «¿cómo voy?» antes de leer una sola fila.
+3. **Pestañas de estado** — la partición natural del listado, subrayadas.
+4. **Fila de filtros** — los filtros a la izquierda y la búsqueda al final
+   (cuando no hay filtros, la búsqueda se queda al principio en vez de
+   descolgarse sola a la derecha).
+5. **Tabla densa** — dentro de un marco `rounded-lg border`: cabeceras
+   apagadas de 40 px que **ordenan contra el servidor**, filas de 57 px,
+   importes a la derecha en `tabular-nums` con su base debajo, estado como
+   insignia semántica y un menú `…` de acciones por fila.
+6. **Pie** — el total en pantalla cuando hay dinero, el recuento, cuántas filas
+   por página y la navegación.
 
 El detalle es el mismo lenguaje en otra forma: identidad y acciones arriba,
 secciones tituladas debajo, metadatos como pares etiqueta-valor.
+
+### Lo que el servidor sabe hacer, y hay que usar
+
+`applyFilters` del modelo `Estimate` (y sus hermanos) acepta **`search`,
+`status`, `customer_id`, `from_date`/`to_date` y `orderByField`/`orderBy`**. O
+sea: **filtrar por fecha y ordenar son server-side**, y así el orden vale para
+las 129 filas del tenant y no para las 25 que se están viendo. Ordenar solo la
+página visible es la clase de mentira que hace desconfiar de una tabla entera.
+
+Dos trampas comprobadas contra la API real:
+
+- **`from_date` y `to_date` van juntas o no van**: el servidor solo entra en el
+  filtro de rango si tiene las dos, y con una sola la ignora en silencio.
+- ⛔ **`meta.<recurso>_total_count` NO respeta los filtros.** El controlador lo
+  calcula con un `count()` aparte: con un estado seleccionado sigue diciendo
+  129 mientras la lista enseña 48. El total bueno para el pie es el `total`
+  **del paginador**; aquel solo vale para «cuántos hay en total». Está aislado
+  en `readCompanyCount()` con el aviso puesto.
 
 ## Los ladrillos
 
@@ -45,27 +68,41 @@ réplica de facturas va a heredar; ninguno sabe de dónde salen los datos.
 | Componente | Qué hace |
 |---|---|
 | `PimiaPageHeader` | La cabecera de una pantalla: título (30 px medium), descripción, acción primaria a la derecha y, opcionalmente, migas encima e insignias junto al título. |
+| `PimiaStatCards` | La tira de cifras sobre una lista. No calcula nada: se le pasan números que el servidor haya dicho, y una raya cuando no se saben. |
+| `PimiaSortableHead` | Cabecera que ordena **contra el servidor**, con su flecha de dirección. |
 | `PimiaStatusBadge` | Una insignia de estado con punto de color, por **tono semántico** (`neutral`/`info`/`success`/`warning`/`danger`), no por documento. Trae el mapa de estados de presupuesto (`ESTIMATE_STATUS_META`); facturas añadirá el suyo al lado. |
 | `PimiaAmountCell` | La celda de importe: céntimos → euros por `lib/money`, a la derecha y en `tabular-nums`. `PimiaAmount`, en el mismo fichero, es el importe suelto para fichas y totales. |
 | `PimiaFilterBar` | La fila de filtros: búsqueda con lupa, filtros extra como hijos y acciones al final. |
 | `PimiaStatusTabs` | Las pestañas de estado subrayadas, compuestas sobre el bloque `tabs` de Buzz sin tocar el primitivo. |
-| `PimiaPagination` | El pie de una tabla: rango y total (`lib/pagination.describeRange`, con tests) y la navegación entre páginas. |
+| `PimiaPagination` | El pie de una tabla: rango y total (`lib/pagination.describeRange`, con tests), cuántas filas por página y la navegación. |
 | `PimiaStates` | Sin conectar, cargando, error y vacío. El esqueleto tiene la forma de la tabla que va a sustituir, y el vacío ofrece la primera acción cuando la hay. |
+
+Además, `lib/dateRanges.ts` traduce el desplegable de fechas a
+`from_date`/`to_date` (probado: trimestres, meses de 30 y 31 días y el cambio
+de año).
 
 Un primitivo que falte se añade **por la vía estándar de shadcn**
 (`pnpm dlx shadcn@latest add <x>`, que aterriza en `@/shared/ui` ya tematizado).
-Así entró `table`: un fichero, cero dependencias nuevas.
+Así entraron `table` (cero dependencias nuevas) y `select`
+(`@radix-ui/react-select`, de la misma familia que las que ya había).
 
 ## Lo que a propósito NO se hizo
 
-- **Cabeceras ordenables.** La referencia las tiene; la API de Pimia no acepta
-  criterio de orden y ordenar solo la página visible mentiría sobre el
-  conjunto. Cuando el servidor ordene, la cabecera ya tiene sitio.
-- **Selects de fecha en la fila de filtros.** Mismo motivo: `GET /estimates`
-  admite `page`, `limit`, `search`, `customer_id` y `status`, y nada más.
 - **Acción primaria en Presupuestos.** Un presupuesto se emite desde la ficha
   de su cliente, así que la cabecera de la lista no tiene qué ofrecer; la
   invitación vive en el estado vacío («Elegir un cliente»).
+- **Cifras de dinero en la tira de arriba.** La referencia enseña importes
+  («Past-due balance»); la API de Pimia no publica ningún agregado de dinero de
+  presupuestos, y sumar una página para llamarlo total es exactamente el bug
+  que este pase quitó del panel. Van recuentos hasta que el servidor sume.
+- **Detalle de un presupuesto.** No existe desde la Fase 1. Por eso el menú `…`
+  solo ofrece acciones que hoy hacen algo: un «ver detalle» en gris sería el
+  mismo señuelo que una fila que se resalta y no abre nada.
+
+> **Corregido el 2026-08-08.** Este apartado decía que las cabeceras ordenables
+> y el filtro de fechas eran imposibles «porque la API no los acepta». Era
+> falso: `applyFilters` los soporta desde siempre. Se comprobó leyendo el
+> controlador en `factSaas` y contra el tenant real. Están implementados.
 
 ## Cómo se mira
 

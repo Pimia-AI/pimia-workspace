@@ -548,3 +548,20 @@ gh pr create --repo Pimia-AI/pimia-workspace --base main --head claude/<rama> �
 
 (La alternativa, `gh repo set-default Pimia-AI/pimia-workspace`, arregla la
 máquina pero no el comando que quede escrito en un handoff.)
+
+### 2026-08-08 — La lista del ERP al patrón `invoice-list-2` (👤 fundador)
+
+Segunda vuelta del pase de diseño, con la referencia concreta que fijó el
+fundador. Terreno compartido tocado, además de lo de la entrada anterior:
+
+- **`desktop/src/shared/ui/select.tsx` — fichero NUEVO**, por la vía estándar
+  de shadcn. Trae `@radix-ui/react-select` a `desktop/package.json`, de la
+  misma familia que los Radix que el fork ya usaba. Hacía falta para la fila de
+  filtros (rango de fechas, orden) y para el «N por página» del pie.
+
+Y un hecho sobre la API que conviene no volver a descubrir: **el índice de
+Pimia sí sabe ordenar y filtrar por fecha** (`orderByField`/`orderBy`,
+`from_date`/`to_date` en `applyFilters`), pero **`meta.<recurso>_total_count`
+ignora los filtros** — es un `count()` aparte del controlador. El total honesto
+para un pie de lista es el del paginador. Detalle y aviso en
+[`docs/PIMIA-UI.md`](PIMIA-UI.md) y en `readCompanyCount()`.

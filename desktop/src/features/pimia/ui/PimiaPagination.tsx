@@ -10,6 +10,13 @@
 import { describeRange } from "@/features/pimia/lib/pagination";
 import { Button } from "@/shared/ui/button";
 import { cn } from "@/shared/lib/cn";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/shared/ui/select";
 
 type PimiaPaginationProps = {
   className?: string;
@@ -17,9 +24,12 @@ type PimiaPaginationProps = {
   isBusy?: boolean;
   lastPage: number;
   onPageChange: (page: number) => void;
+  /** Sin esto no se ofrece elegir cuántas filas por página. */
+  onPageSizeChange?: (pageSize: number) => void;
   page: number;
   /** Filas por página, para calcular el rango. */
   pageSize: number;
+  pageSizes?: number[];
   /** Filas en pantalla. */
   shown: number;
   /** Total conocido; `null` cuando la API no lo manda. */
@@ -31,21 +41,45 @@ export function PimiaPagination({
   isBusy,
   lastPage,
   onPageChange,
+  onPageSizeChange,
   page,
   pageSize,
+  pageSizes = [25, 50, 100],
   shown,
   total,
 }: PimiaPaginationProps) {
   return (
     <div
       className={cn(
-        "flex items-center justify-between gap-4 border-t border-border px-3 py-2.5",
+        "flex flex-wrap items-center justify-between gap-3 border-t border-border px-3 py-2.5",
         className,
       )}
     >
-      <p className="text-xs text-muted-foreground">
-        {describeRange(page, pageSize, shown, total)}
-      </p>
+      <div className="flex items-center gap-3">
+        <p className="text-xs text-muted-foreground">
+          {describeRange(page, pageSize, shown, total)}
+        </p>
+        {onPageSizeChange ? (
+          <Select
+            onValueChange={(value) => onPageSizeChange(Number(value))}
+            value={String(pageSize)}
+          >
+            <SelectTrigger
+              className="h-7 w-[7.5rem] text-xs"
+              data-testid="pimia-page-size"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {pageSizes.map((size) => (
+                <SelectItem key={size} value={String(size)}>
+                  {size} por página
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : null}
+      </div>
       {lastPage > 1 ? (
         <div className="flex items-center gap-2">
           <Button

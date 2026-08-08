@@ -102,14 +102,15 @@ export function PimiaScreen() {
           icon={Users}
           label="Clientes"
           onOpen={() => void goPimiaPath("/pimia/clientes")}
-          value={count(customersQuery.data?.totalCount)}
+          value={count(customersQuery.data?.companyTotalCount)}
         />
         <StatCard
           hint="emitidos en total"
           icon={FileText}
           label="Presupuestos"
           onOpen={() => void goPimiaPath("/pimia/presupuestos")}
-          value={count(estimatesQuery.data?.totalCount)}
+          // El del tenant entero, no el de la página que se acaba de pedir.
+          value={count(estimatesQuery.data?.companyTotalCount)}
         />
         <StatCard
           hint="enviados o vistos, sin resolver"

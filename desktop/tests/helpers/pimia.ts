@@ -295,19 +295,37 @@ export async function installPimiaMock(
       const allCustomers = opts.empty ? [] : customers;
       const allEstimates = opts.empty ? [] : estimates;
 
+      /**
+       * Igual que responde Pimia, con su trampa incluida: el `meta` lleva a la
+       * vez el total del **paginador** (que sí filtra) y el
+       * `<recurso>_total_count` del controlador, que es el de la empresa
+       * entera e ignora los filtros. Si el mock no reprodujese esa diferencia,
+       * el pie de la lista podría mentir en producción y salir bien aquí.
+       */
       const listPayload = (
         rows: unknown[],
+        allRows: unknown[],
         totalKey: string,
         query: Record<string, unknown>,
       ) => {
-        const limit = Number(query.limit ?? rows.length) || rows.length;
-        const page_ = Number(query.page ?? 1) || 1;
-        const start = (page_ - 1) * limit;
+        const limit = Number(query.limit ?? rows.length) || rows.length || 1;
+        const currentPage = Number(query.page ?? 1) || 1;
+        const start = (currentPage - 1) * limit;
         return {
           data: rows.slice(start, start + limit),
-          meta: { [totalKey]: rows.length },
+          meta: {
+            current_page: currentPage,
+            last_page: Math.max(1, Math.ceil(rows.length / limit)),
+            total: rows.length,
+            [totalKey]: allRows.length,
+          },
         };
       };
+
+      const compare = (a: unknown, b: unknown) =>
+        typeof a === "number" && typeof b === "number"
+          ? a - b
+          : String(a ?? "").localeCompare(String(b ?? ""));
 
       const handle = (path: string, query: Record<string, unknown>) => {
         const clean = path.replace(/^\/api\/v1/, "");
@@ -323,7 +341,7 @@ export async function installPimiaMock(
                   .includes(search),
               )
             : allCustomers;
-          return listPayload(rows, "customer_total_count", query);
+          return listPayload(rows, allCustomers, "customer_total_count", query);
         }
 
         if (clean.startsWith("/customers/")) {
@@ -352,7 +370,28 @@ export async function installPimiaMock(
                 .includes(search),
             );
           }
-          return listPayload(rows, "estimate_total_count", query);
+          // El servidor solo entra en el rango si tiene las dos fechas.
+          if (query.from_date && query.to_date) {
+            const from = String(query.from_date);
+            const to = String(query.to_date);
+            rows = rows.filter(
+              (row) => row.estimate_date >= from && row.estimate_date <= to,
+            );
+          }
+          if (query.orderByField) {
+            const field = String(query.orderByField);
+            const direction =
+              String(query.orderBy ?? "desc") === "asc" ? 1 : -1;
+            rows = [...rows].sort(
+              (a, b) =>
+                direction *
+                compare(
+                  (a as Record<string, unknown>)[field],
+                  (b as Record<string, unknown>)[field],
+                ),
+            );
+          }
+          return listPayload(rows, allEstimates, "estimate_total_count", query);
         }
 
         if (clean === "/next-number") {

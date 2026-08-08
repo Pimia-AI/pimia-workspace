@@ -171,6 +171,24 @@ export function readPagination(payload: unknown): PimiaPagination | null {
 }
 
 /**
+ * El `meta.<recurso>_total_count` que añaden los índices de Pimia.
+ *
+ * ⚠️ Es el total **de la empresa**, no el del filtro: el controlador lo calcula
+ * con un `count()` aparte que ignora `applyFilters`. Con un estado
+ * seleccionado sigue diciendo 129 mientras la lista enseña 48. Sirve para «hay
+ * N en total», nunca para el pie de una lista filtrada — para eso está el
+ * `total` del paginador, que sí filtra.
+ */
+export function readCompanyCount(payload: unknown, key: string): number | null {
+  if (typeof payload !== "object" || payload === null) {
+    return null;
+  }
+  const meta = (payload as { meta?: Record<string, unknown> }).meta;
+  const value = meta?.[key];
+  return typeof value === "number" ? value : null;
+}
+
+/**
  * Paginación derivada cuando el recurso no la manda.
  *
  * Los índices de clientes y presupuestos devuelven `meta.<recurso>_total_count`

@@ -35,15 +35,27 @@ export function PimiaAmount({ cents, className, dimZero }: PimiaAmountProps) {
   );
 }
 
-/** La celda de importe de una tabla del ERP. */
+/**
+ * La celda de importe de una tabla del ERP.
+ *
+ * El `hint` es la segunda línea apagada del patrón de la referencia (allí,
+ * «Total» sobre «Amount Due»). Aquí lleva la base imponible: la cifra grande es
+ * lo que se cobra y debajo, en pequeño, de dónde sale.
+ */
 export function PimiaAmountCell({
   cents,
   className,
   dimZero = true,
-}: PimiaAmountProps) {
+  hint,
+}: PimiaAmountProps & { hint?: string }) {
   return (
     <TableCell className={cn("text-right font-medium", className)}>
       <PimiaAmount cents={cents} dimZero={dimZero} />
+      {hint ? (
+        <span className="block whitespace-nowrap text-xs font-normal tabular-nums text-muted-foreground">
+          {hint}
+        </span>
+      ) : null}
     </TableCell>
   );
 }

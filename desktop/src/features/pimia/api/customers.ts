@@ -9,6 +9,7 @@
 import {
   pimiaRequest,
   derivePagination,
+  readCompanyCount,
   readPagination,
   unwrapItem,
   unwrapList,
@@ -32,8 +33,10 @@ export type PimiaCustomer = {
 export type PimiaCustomerPage = {
   customers: PimiaCustomer[];
   pagination: PimiaPagination | null;
-  /** Total que devuelve `meta.customer_total_count`, cuando viene. */
+  /** Los que casan con la búsqueda actual: el `total` del paginador. */
   totalCount: number | null;
+  /** Todos los del tenant, ignorando el filtro. Ver `readCompanyCount`. */
+  companyTotalCount: number | null;
 };
 
 type RawCustomer = Record<string, unknown>;
@@ -78,23 +81,19 @@ export async function listCustomers(
     },
   });
 
-  const meta =
-    typeof payload === "object" && payload !== null
-      ? ((payload as { meta?: Record<string, unknown> }).meta ?? {})
-      : {};
-  const totalCount = meta.customer_total_count;
-
-  const resolvedTotal = typeof totalCount === "number" ? totalCount : null;
+  const companyTotalCount = readCompanyCount(payload, "customer_total_count");
+  const pagination = derivePagination(
+    readPagination(payload),
+    companyTotalCount,
+    input.page,
+    input.limit,
+  );
 
   return {
     customers: unwrapList<RawCustomer>(payload).map(normalizeCustomer),
-    pagination: derivePagination(
-      readPagination(payload),
-      resolvedTotal,
-      input.page,
-      input.limit,
-    ),
-    totalCount: resolvedTotal,
+    pagination,
+    totalCount: pagination?.total ?? companyTotalCount,
+    companyTotalCount,
   };
 }
 
