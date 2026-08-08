@@ -497,3 +497,93 @@ documentado con `${BUZZ_INSTANCE_SLUG:-main}`—, que tiene identidad pero **no*
 `pimia.tenants`. O sea: la identidad Nostr se conserva y no hay que rehacer el
 onboarding de Buzz, pero **hay que reconectar Pimia una vez**. A cambio, la
 conexión deja de evaporarse en cada cambio de rama, que era el problema.
+
+### 2026-08-08 — El pase de diseño del ERP (patrones de la referencia)
+
+Trabajo casi todo dentro de `desktop/src/features/pimia/`, que es nuestro y no
+existe upstream. Lo que **sí** toca terreno compartido, y por qué:
+
+- **`desktop/src/shared/ui/table.tsx` — fichero NUEVO.** Faltaba el primitivo
+  `table` y las listas densas de la referencia no se pueden hacer sin él.
+  Entró por la vía estándar (`pnpm dlx shadcn@latest add table`): un fichero,
+  MIT, tematizado por las variables que ya hay, **cero dependencias nuevas**
+  (el bloque `table` de shadcn es HTML puro, sin Radix). No hay conflicto
+  posible con upstream mientras upstream no añada uno propio; si lo añade,
+  gana el suyo y nuestras tablas se recompilan contra él.
+- **`desktop/playwright.config.ts`** — una línea más en el `testMatch` del
+  proyecto `smoke` para el spec de capturas del ERP. Misma clase de
+  divergencia que la que ya metió `dual-sidebars.spec.ts`; se resuelve sola en
+  cualquier merge razonable.
+
+Y una decisión que evita una divergencia mayor: la insignia de estado
+**no modifica `shared/ui/badge.tsx`**. La variante `destructive` de Buzz es
+sólida —pensada para un botón de borrar— y al lado de las demás gritaba en una
+tabla; en vez de tocar el primitivo, `PimiaStatusBadge` la atenúa con la misma
+variable (`bg-destructive/15 text-destructive`). Un fichero menos que
+reconciliar cada vez que upstream toque su sistema de insignias.
+
+El lenguaje visual y los componentes compuestos están documentados en
+[`docs/PIMIA-UI.md`](PIMIA-UI.md).
+
+### 2026-08-08 — `gh pr create` abre el PR contra **upstream** si no se le dice el repo
+
+Misma familia que el caso de `post-screenshots.sh`, y con la misma raíz: el
+clon conserva el remoto `upstream` apuntando a `block/buzz`, y `gh` toma el
+repo padre como base por defecto. El síntoma no dice nada de eso:
+
+```
+GraphQL: Head sha can't be blank, Base sha can't be blank,
+No commits between main and claude/<rama>, Head ref must be a branch
+```
+
+Es literal: en `block/buzz` esa rama no existe. Mientras tanto
+`gh api repos/Pimia-AI/pimia-workspace/compare/main...claude/<rama>` responde
+`ahead: 4`, o sea que la rama está bien empujada y el error engaña.
+
+**El remedio es pasar el repo siempre**, que además deja el comando copiable:
+
+```bash
+gh pr create --repo Pimia-AI/pimia-workspace --base main --head claude/<rama> …
+```
+
+(La alternativa, `gh repo set-default Pimia-AI/pimia-workspace`, arregla la
+máquina pero no el comando que quede escrito en un handoff.)
+
+### 2026-08-08 — La lista del ERP al patrón `invoice-list-2` (👤 fundador)
+
+Segunda vuelta del pase de diseño, con la referencia concreta que fijó el
+fundador. Terreno compartido tocado, además de lo de la entrada anterior:
+
+- **`desktop/src/shared/ui/select.tsx` — fichero NUEVO**, por la vía estándar
+  de shadcn. Trae `@radix-ui/react-select` a `desktop/package.json`, de la
+  misma familia que los Radix que el fork ya usaba. Hacía falta para la fila de
+  filtros (rango de fechas, orden) y para el «N por página» del pie.
+
+Y un hecho sobre la API que conviene no volver a descubrir: **el índice de
+Pimia sí sabe ordenar y filtrar por fecha** (`orderByField`/`orderBy`,
+`from_date`/`to_date` en `applyFilters`), pero **`meta.<recurso>_total_count`
+ignora los filtros** — es un `count()` aparte del controlador. El total honesto
+para un pie de lista es el del paginador. Detalle y aviso en
+[`docs/PIMIA-UI.md`](PIMIA-UI.md) y en `readCompanyCount()`.
+
+### 2026-08-08 — ⚠️ `routeTree.gen.ts` y el `tauri dev` zombi
+
+Añadir una ruta (`/pimia/presupuestos/$estimateId`) destapó dos trampas del
+generador de TanStack Router que cuestan media hora si no se conocen:
+
+1. **`vite build` NO regenera el árbol de rutas.** El plugin lo genera en modo
+   **dev**. Con `pnpm build:e2e` (que es `tsc && vite build`) el typecheck falla
+   con `'/pimia/…' is not assignable to keyof FileRoutesByPath` y el build
+   posterior no lo arregla. La receta: levantar el dev un momento y matarlo.
+
+   ```bash
+   npx vite --port 41227 --strictPort &   # regenera src/app/routeTree.gen.ts
+   ```
+
+2. **Un `tauri dev` viejo revierte el árbol.** `virtualRouteConfig`
+   (`src/app/routes.ts`) se lee **una vez, al arrancar**: un dev server que
+   siga vivo de antes de tocar `routes.ts` reescribe `routeTree.gen.ts` con su
+   configuración antigua en cada pasada del watcher, borrando la ruta recién
+   generada. Se vio literalmente: el fichero volvía a su tamaño exacto anterior
+   segundos después de generarlo bien. **Antes de añadir rutas, comprobar que
+   no queda ninguno**: `pgrep -fl "vite|buzz-desktop"`.

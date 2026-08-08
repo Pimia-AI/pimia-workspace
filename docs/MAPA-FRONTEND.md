@@ -256,6 +256,14 @@ escriba nueva debe usar las variables de `theme.css` tal cual
 (`bg-background`, `text-muted-foreground`, `border-border`…) en vez de traer
 colores propios — que es lo que hace el placeholder de `features/pimia/`.
 
+**Ejecutado el 2026-08-08**: el pase de diseño llevó las vistas del ERP a los
+patrones de la referencia (shadcnblocks admin) sin salirse de estas variables.
+El lenguaje visual, los componentes compuestos que nacieron de ahí
+(`PimiaPageHeader`, `PimiaStatusBadge`, `PimiaAmountCell`, `PimiaFilterBar`,
+`PimiaStatusTabs`, `PimiaPagination`) y lo que a propósito se dejó fuera están
+en [`PIMIA-UI.md`](PIMIA-UI.md). Único primitivo que hubo que añadir a
+`@/shared/ui`: `table`.
+
 ## 7. ¿Hay sistema de plugins? No, y probablemente no hace falta
 
 No existe mecanismo de extensiones de terceros: nada se carga en tiempo de

@@ -16,8 +16,10 @@ function plain(text) {
 
 test("formatCents pasa de céntimos a euros con formato español", () => {
   // 4.500,50 € en la API son 450050 céntimos — el ejemplo del handoff.
-  // (El español no agrupa a partir de cuatro dígitos: «4500,50», «12.345,67».)
-  assert.equal(plain(formatCents(450050)), "4500,50 €");
+  // Se agrupa también a los cuatro dígitos, que es lo que hace el panel de
+  // Pimia: el `es-ES` de `Intl` escribiría «4500,50» por su cuenta, y el mismo
+  // presupuesto no puede leerse distinto según por dónde se mire.
+  assert.equal(plain(formatCents(450050)), "4.500,50 €");
   assert.equal(plain(formatCents(1234567)), "12.345,67 €");
   assert.equal(plain(formatCents(0)), "0,00 €");
   assert.equal(plain(formatCents(1)), "0,01 €");

@@ -17,6 +17,7 @@ import {
   PimiaApiError,
   pimiaRequest,
   derivePagination,
+  readCompanyCount,
   readPagination,
   unwrapItem,
   unwrapList,
@@ -35,16 +36,61 @@ export const ESTIMATE_STATUSES = [
 
 export type PimiaEstimateStatus = (typeof ESTIMATE_STATUSES)[number];
 
+/**
+ * Un impuesto aplicado, con su nombre y su tipo.
+ *
+ * Importa que vayan uno a uno y no sumados: en España un presupuesto lleva a
+ * la vez IVA y **retención de IRPF**, que es negativa. Sumarlos da un neto
+ * («impuestos: 150 €») que esconde los 525 de IVA y los −375 de retención, y
+ * la retención es justo lo que un autónomo mira.
+ */
+export type PimiaEstimateTax = {
+  id: string;
+  name: string;
+  /** Porcentaje; negativo en las retenciones. `null` si es de importe fijo. */
+  percent: number | null;
+  amountCents: number | null;
+};
+
+/** Una línea del presupuesto. Los importes, en céntimos enteros. */
+export type PimiaEstimateLine = {
+  id: string;
+  name: string;
+  description: string | null;
+  quantity: number | null;
+  unitName: string | null;
+  priceCents: number | null;
+  discountCents: number | null;
+  taxCents: number | null;
+  totalCents: number | null;
+  /** Los impuestos de la línea, cuando el documento los lleva por línea. */
+  taxes: PimiaEstimateTax[] | null;
+};
+
 export type PimiaEstimate = {
   id: string;
   estimateNumber: string;
+  referenceNumber: string | null;
   status: PimiaEstimateStatus | string;
   estimateDate: string | null;
   expiryDate: string | null;
   customerId: string | null;
   customerName: string | null;
+  /** Solo en el detalle: el índice devuelve del cliente nada más el nombre. */
+  customerEmail: string | null;
+  customerPhone: string | null;
+  notes: string | null;
+  /** Los impuestos de la cabecera, desglosados. */
+  taxes: PimiaEstimateTax[] | null;
+  /**
+   * Las líneas solo vienen en el detalle (`show`), y solo si las hay: el
+   * recurso las envuelve en un `when(...)`. `null` es «no se pidieron», que no
+   * es lo mismo que `[]`, «no tiene».
+   */
+  lines: PimiaEstimateLine[] | null;
   /** Todos en céntimos enteros. */
   subTotalCents: number | null;
+  discountCents: number | null;
   taxCents: number | null;
   totalCents: number | null;
 };
@@ -52,8 +98,22 @@ export type PimiaEstimate = {
 export type PimiaEstimatePage = {
   estimates: PimiaEstimate[];
   pagination: PimiaPagination | null;
+  /** Los que casan con el filtro actual: el `total` del paginador. */
   totalCount: number | null;
+  /** Todos los del tenant, ignorando el filtro. Ver `readCompanyCount`. */
+  companyTotalCount: number | null;
 };
+
+/** Campos por los que el índice sabe ordenar (`orderByField` de la API). */
+export const ESTIMATE_SORT_FIELDS = [
+  "estimate_date",
+  "expiry_date",
+  "estimate_number",
+  "status",
+  "total",
+] as const;
+
+export type PimiaEstimateSortField = (typeof ESTIMATE_SORT_FIELDS)[number];
 
 type RawEstimate = Record<string, unknown>;
 
@@ -65,17 +125,81 @@ function text(value: unknown): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
+/** La cantidad puede venir como número o como cadena, y puede ser decimal. */
+function readQuantity(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value.replace(",", "."));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+/** El porcentaje llega como número o cadena; puede ser negativo (retención). */
+function readPercent(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value.replace(",", "."));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function normalizeTaxes(value: unknown): PimiaEstimateTax[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  return value.map((entry) => {
+    const raw = entry as Record<string, unknown>;
+    return {
+      id: String(raw.id ?? ""),
+      name: text(raw.name) ?? "Impuesto",
+      percent: readPercent(raw.percent),
+      amountCents: readCents(raw.amount),
+    };
+  });
+}
+
+function normalizeLine(raw: Record<string, unknown>): PimiaEstimateLine {
+  return {
+    id: String(raw.id ?? ""),
+    name: text(raw.name) ?? "(sin concepto)",
+    description: text(raw.description),
+    quantity: readQuantity(raw.quantity),
+    unitName: text(raw.unit_name),
+    priceCents: readCents(raw.price),
+    discountCents: readCents(raw.discount_val),
+    taxCents: readCents(raw.tax),
+    totalCents: readCents(raw.total),
+    taxes: normalizeTaxes(raw.taxes),
+  };
+}
+
 function normalizeEstimate(raw: RawEstimate): PimiaEstimate {
   const customer = raw.customer as Record<string, unknown> | undefined;
+  const items = raw.items;
   return {
     id: String(raw.id ?? ""),
     estimateNumber: text(raw.estimate_number) ?? "(sin número)",
+    referenceNumber: text(raw.reference_number),
     status: text(raw.status) ?? "DRAFT",
     estimateDate: text(raw.estimate_date),
     expiryDate: text(raw.expiry_date),
     customerId: raw.customer_id === undefined ? null : String(raw.customer_id),
     customerName: customer ? text(customer.name) : null,
+    customerEmail: customer ? text(customer.email) : null,
+    customerPhone: customer ? text(customer.phone) : null,
+    notes: text(raw.notes),
+    taxes: normalizeTaxes(raw.taxes),
+    lines: Array.isArray(items)
+      ? items.map((item) => normalizeLine(item as Record<string, unknown>))
+      : null,
     subTotalCents: readCents(raw.sub_total),
+    discountCents: readCents(raw.discount_val),
     taxCents: readCents(raw.tax),
     totalCents: readCents(raw.total),
   };
@@ -87,11 +211,20 @@ export type ListEstimatesInput = {
   search?: string;
   customerId?: string;
   status?: PimiaEstimateStatus;
+  /** `YYYY-MM-DD`. La API exige las dos o ninguna. */
+  fromDate?: string;
+  toDate?: string;
+  orderByField?: PimiaEstimateSortField;
+  orderBy?: "asc" | "desc";
 };
 
 export async function listEstimates(
   input: ListEstimatesInput = {},
 ): Promise<PimiaEstimatePage> {
+  // `from_date`/`to_date` van juntas o no van: el servidor solo entra en el
+  // filtro de rango si tiene las dos, y con una sola las ignoraría en silencio.
+  const hasRange = Boolean(input.fromDate && input.toDate);
+
   const payload = await pimiaRequest<unknown>({
     path: "/estimates",
     query: {
@@ -100,26 +233,26 @@ export async function listEstimates(
       search: input.search?.trim() || undefined,
       customer_id: input.customerId,
       status: input.status,
+      from_date: hasRange ? input.fromDate : undefined,
+      to_date: hasRange ? input.toDate : undefined,
+      orderByField: input.orderByField,
+      orderBy: input.orderByField ? (input.orderBy ?? "desc") : undefined,
     },
   });
 
-  const meta =
-    typeof payload === "object" && payload !== null
-      ? ((payload as { meta?: Record<string, unknown> }).meta ?? {})
-      : {};
-  const totalCount = meta.estimate_total_count;
-
-  const resolvedTotal = typeof totalCount === "number" ? totalCount : null;
+  const companyTotalCount = readCompanyCount(payload, "estimate_total_count");
+  const pagination = derivePagination(
+    readPagination(payload),
+    companyTotalCount,
+    input.page,
+    input.limit,
+  );
 
   return {
     estimates: unwrapList<RawEstimate>(payload).map(normalizeEstimate),
-    pagination: derivePagination(
-      readPagination(payload),
-      resolvedTotal,
-      input.page,
-      input.limit,
-    ),
-    totalCount: resolvedTotal,
+    pagination,
+    totalCount: pagination?.total ?? companyTotalCount,
+    companyTotalCount,
   };
 }
 

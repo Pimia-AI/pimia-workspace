@@ -19,6 +19,7 @@ import { Route as pimiaDotpresupuestosRouteImport } from "./routes/pimia.presupu
 import { Route as pimiaDotclientesRouteImport } from "./routes/pimia.clientes";
 import { Route as messagesDotnewRouteImport } from "./routes/messages.new";
 import { Route as channelsDotchannelIdRouteImport } from "./routes/channels.$channelId";
+import { Route as pimiaDotpresupuestosDotestimateIdRouteImport } from "./routes/pimia.presupuestos.$estimateId";
 import { Route as pimiaDotclientesDotcustomerIdRouteImport } from "./routes/pimia.clientes.$customerId";
 import { Route as channelsDotchannelIdDotpostsDotpostIdRouteImport } from "./routes/channels.$channelId.posts.$postId";
 
@@ -92,6 +93,12 @@ const channelsDotchannelIdRoute = channelsDotchannelIdRouteImport.update({
   path: "/channels/$channelId",
   getParentRoute: () => rootRouteImport,
 } as any);
+const pimiaDotpresupuestosDotestimateIdRoute =
+  pimiaDotpresupuestosDotestimateIdRouteImport.update({
+    id: "/pimia/presupuestos/$estimateId",
+    path: "/pimia/presupuestos/$estimateId",
+    getParentRoute: () => rootRouteImport,
+  } as any);
 const pimiaDotclientesDotcustomerIdRoute =
   pimiaDotclientesDotcustomerIdRouteImport.update({
     id: "/pimia/clientes/$customerId",
@@ -121,6 +128,7 @@ export interface FileRoutesByFullPath {
   "/projects/$projectId": typeof projectsDotprojectIdRoute;
   "/workflows/$workflowId": typeof workflowsDotworkflowIdRoute;
   "/pimia/clientes/$customerId": typeof pimiaDotclientesDotcustomerIdRoute;
+  "/pimia/presupuestos/$estimateId": typeof pimiaDotpresupuestosDotestimateIdRoute;
   "/channels/$channelId/posts/$postId": typeof channelsDotchannelIdDotpostsDotpostIdRoute;
 }
 export interface FileRoutesByTo {
@@ -139,6 +147,7 @@ export interface FileRoutesByTo {
   "/projects/$projectId": typeof projectsDotprojectIdRoute;
   "/workflows/$workflowId": typeof workflowsDotworkflowIdRoute;
   "/pimia/clientes/$customerId": typeof pimiaDotclientesDotcustomerIdRoute;
+  "/pimia/presupuestos/$estimateId": typeof pimiaDotpresupuestosDotestimateIdRoute;
   "/channels/$channelId/posts/$postId": typeof channelsDotchannelIdDotpostsDotpostIdRoute;
 }
 export interface FileRoutesById {
@@ -158,6 +167,7 @@ export interface FileRoutesById {
   "/projects/$projectId": typeof projectsDotprojectIdRoute;
   "/workflows/$workflowId": typeof workflowsDotworkflowIdRoute;
   "/pimia/clientes/$customerId": typeof pimiaDotclientesDotcustomerIdRoute;
+  "/pimia/presupuestos/$estimateId": typeof pimiaDotpresupuestosDotestimateIdRoute;
   "/channels/$channelId/posts/$postId": typeof channelsDotchannelIdDotpostsDotpostIdRoute;
 }
 export interface FileRouteTypes {
@@ -178,6 +188,7 @@ export interface FileRouteTypes {
     | "/projects/$projectId"
     | "/workflows/$workflowId"
     | "/pimia/clientes/$customerId"
+    | "/pimia/presupuestos/$estimateId"
     | "/channels/$channelId/posts/$postId";
   fileRoutesByTo: FileRoutesByTo;
   to:
@@ -196,6 +207,7 @@ export interface FileRouteTypes {
     | "/projects/$projectId"
     | "/workflows/$workflowId"
     | "/pimia/clientes/$customerId"
+    | "/pimia/presupuestos/$estimateId"
     | "/channels/$channelId/posts/$postId";
   id:
     | "__root__"
@@ -214,6 +226,7 @@ export interface FileRouteTypes {
     | "/projects/$projectId"
     | "/workflows/$workflowId"
     | "/pimia/clientes/$customerId"
+    | "/pimia/presupuestos/$estimateId"
     | "/channels/$channelId/posts/$postId";
   fileRoutesById: FileRoutesById;
 }
@@ -233,6 +246,7 @@ export interface RootRouteChildren {
   projectsDotprojectIdRoute: typeof projectsDotprojectIdRoute;
   workflowsDotworkflowIdRoute: typeof workflowsDotworkflowIdRoute;
   pimiaDotclientesDotcustomerIdRoute: typeof pimiaDotclientesDotcustomerIdRoute;
+  pimiaDotpresupuestosDotestimateIdRoute: typeof pimiaDotpresupuestosDotestimateIdRoute;
   channelsDotchannelIdDotpostsDotpostIdRoute: typeof channelsDotchannelIdDotpostsDotpostIdRoute;
 }
 
@@ -336,6 +350,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof channelsDotchannelIdRouteImport;
       parentRoute: typeof rootRouteImport;
     };
+    "/pimia/presupuestos/$estimateId": {
+      id: "/pimia/presupuestos/$estimateId";
+      path: "/pimia/presupuestos/$estimateId";
+      fullPath: "/pimia/presupuestos/$estimateId";
+      preLoaderRoute: typeof pimiaDotpresupuestosDotestimateIdRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     "/pimia/clientes/$customerId": {
       id: "/pimia/clientes/$customerId";
       path: "/pimia/clientes/$customerId";
@@ -369,6 +390,8 @@ const rootRouteChildren: RootRouteChildren = {
   projectsDotprojectIdRoute: projectsDotprojectIdRoute,
   workflowsDotworkflowIdRoute: workflowsDotworkflowIdRoute,
   pimiaDotclientesDotcustomerIdRoute: pimiaDotclientesDotcustomerIdRoute,
+  pimiaDotpresupuestosDotestimateIdRoute:
+    pimiaDotpresupuestosDotestimateIdRoute,
   channelsDotchannelIdDotpostsDotpostIdRoute:
     channelsDotchannelIdDotpostsDotpostIdRoute,
 };
