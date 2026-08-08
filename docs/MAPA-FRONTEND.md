@@ -96,47 +96,47 @@ importa de `shared/api/relay*`**. El relay guarda los mensajes de canal en
 claro en un Postgres que no administramos: los datos del ERP no pueden pasar
 por ahí.
 
-## 4-bis. La disposición objetivo: Pimia a la izquierda, Buzz a la derecha
+## 4-bis. Las dos barras: Pimia a la izquierda, Buzz a la derecha
 
-⚠️ **Lo que hay hoy NO es la disposición del plan.** El placeholder de la Fase 0
-es *una entrada más* dentro de la barra de Buzz. El objetivo (§ del plan, y
-👤 fundador 2026-08-08) es otro: **la navegación del ERP ocupa la barra
-izquierda y la de Buzz —canales, DM, agentes— se va a la derecha.** Eso es
-reorganizar el shell, no añadir un enlace, y es trabajo de la Fase 1.
+✅ **HECHO en la Fase 1** (2026-08-08). Lo que sigue es cómo quedó, no lo que
+falta. El registro de la divergencia está en
+[`UPSTREAM.md`](UPSTREAM.md#2026-08-08--dos-barras-pimia-a-la-izquierda-buzz-a-la-derecha-fase-1).
 
-Lo verificado sobre cuánto cuesta:
+| | Izquierda | Derecha |
+|---|---|---|
+| Qué | La navegación del ERP | Buzz: canales, DM, agentes |
+| Componente | `features/pimia/ui/PimiaSidebar.tsx` | `features/sidebar/ui/AppSidebar.tsx` (con `side="right"`) |
+| Plegado | `collapsible="icon"` — nunca se va de pantalla | `collapsible="offcanvas"` — como en upstream |
+| Interruptor | En su propia cabecera | El del chrome, ahora en el extremo derecho |
+| Atajo | ⌘⇧S | ⌘S (el de siempre) |
+| Scope | `PIMIA_SIDEBAR_SCOPE` | `BUZZ_SIDEBAR_SCOPE` |
 
-- **A favor**: el `Sidebar` de shadcn ya acepta `side="left" | "right"`
-  (`shared/ui/sidebar.tsx:286`). Mover `AppSidebar` a la derecha es un prop.
-- **En contra, y es el trabajo de verdad**: `SidebarProvider` está escrito para
-  **una sola barra**. Hay exactamente un `<SidebarProvider>` en toda la app
-  (`AppShell.tsx:790`) y las claves de estado son constantes de módulo, no
-  parámetros: `SIDEBAR_COOKIE_NAME = "sidebar_state"`,
-  `SIDEBAR_WIDTH_STORAGE_KEY = "buzz-sidebar-width"`,
-  `SIDEBAR_KEYBOARD_SHORTCUT = "s"`, y la anchura viaja por un único
-  `--sidebar-width`. Dos barras con este código compartirían estado: se
-  abrirían y redimensionarían juntas.
-- **El panel derecho que ya existe no sirve para esto.**
-  `shared/layout/AuxiliaryPanel*` es contextual —hilos de mensajes, perfiles,
-  gestión de canales—, se abre y se cierra sobre el contenido. No es una barra
-  de navegación permanente.
+**El estado va por «scope».** El bloque `sidebar` de shadcn estaba escrito para
+una sola barra: cookie, clave de anchura y atajo eran constantes de módulo. Ahora
+un `SidebarScope` los lleva por prop (`shared/ui/sidebar-provider.tsx`), y los
+dos scopes de la app viven en `app/sidebarScopes.ts`. Si añades una tercera
+barra algún día, es un scope más y un provider más.
 
-Camino recomendado para la Fase 1: parametrizar `sidebar.tsx` (que es código
-copiado en el repo, no una dependencia) para que cada `SidebarProvider` reciba
-sus propias claves de cookie, `localStorage`, atajo y variable CSS; luego
-montar dos providers en `AppShell`, con `AppSidebar` en `side="right"` y la
-nav del ERP en la izquierda. Es acotado y de una sola vez, pero **es una
-divergencia estructural con upstream** y hay que anotarla en `UPSTREAM.md`
-cuando se haga: `sidebar.tsx` es de los ficheros que upstream toca.
+**Cómo se montan**: providers **anidados**, no en paralelo. El de Buzz es el del
+shell entero (así `AppTopChrome`, `SettingsView` y `RelayConnectionOverlay`
+siguen viendo el mismo contexto que en upstream); el de Pimia es interno y solo
+envuelve su barra, con `className="contents"` para no meter una caja en la fila
+—las variables CSS heredan igual y cada barra conserva su `--sidebar-width`.
+
+**Lo cubre un e2e**: `desktop/tests/e2e/dual-sidebars.spec.ts` (lado, plegado
+independiente, anchura independiente, colapso a iconos y navegación). Si alguien
+revierte la parametrización, esas pruebas se caen.
 
 ## 5. La receta: añadir una sección sin tocar el core de mensajería
 
 Verificada: la sección «Pimia» de este repo se hizo exactamente así, y el
 `pnpm check` completo (Biome + trinquete de tamaño + guards) pasa en verde.
 
-Sirve para **añadir una sección a la barra existente**. Es la receta que la
-Fase 1 usará para cada módulo del ERP una vez montada la disposición de dos
-barras de §4-bis; no sustituye a ese trabajo.
+Sirve para **añadir una sección a una de las dos barras**. Con la disposición
+de §4-bis ya montada, un módulo del ERP no toca `AppSidebarPinnedHeader.tsx`:
+se añade a la tabla `PIMIA_NAV_ENTRIES` de
+`features/pimia/ui/PimiaSidebar.tsx` (una entrada = icono, etiqueta y ruta) y se
+registra la ruta. Los pasos 2-5 son idénticos.
 
 **Seis ficheros. Ninguno del core de mensajería.**
 
@@ -289,3 +289,36 @@ el identificador de dev (`es.pimia.workspace.dev`).
 
 No uses `just fresh=1 desktop-standalone` salvo que quieras de verdad borrar el
 estado local: esa vía llama a `scripts/reset-desktop-standalone-state.sh`.
+
+## 9. El módulo del ERP (Fase 1)
+
+Dónde vive lo que se construyó en la Fase 1, para no tener que buscarlo:
+
+```
+desktop/src-tauri/src/pimia/     # todo el OAuth y todo el HTTP: vive en Rust
+  vault.rs      # el TokenSet en el llavero (clave `pimia.tenants`)
+  oauth.rs      # metadata, registro dinámico, PKCE, canje, refresco, revocación
+  login.rs      # el retorno del navegador (loopback + esquema propio)
+  api.rs        # proxy autenticado a /api/v1 con refresco y reintentos
+  commands.rs   # los seis comandos que ve el webview
+
+desktop/src/features/pimia/
+  api/          # pimiaClient.ts (invoke), auth.ts, customers.ts, estimates.ts
+  hooks/        # TanStack Query, con la caché por tenant
+  lib/money.ts  # céntimos ↔ euros, con tests
+  ui/           # PimiaSidebar, panel, clientes, detalle, presupuestos, diálogos
+```
+
+**Tres cosas que ahorran un rato:**
+
+1. **El token no entra nunca en JavaScript.** El webview manda
+   `pimia_api_request` y recibe datos de negocio. Si necesitas un endpoint
+   nuevo, no hace falta tocar Rust: `pimiaRequest({ path, query, body })`
+   acepta cualquier ruta de `/api/v1`.
+2. **Los importes son céntimos enteros.** `4.500,50 €` es `450050`. Usa
+   `formatCents` / `parseAmountToCents` de `lib/money.ts` y no hagas aritmética
+   de dinero en float fuera de ahí.
+3. **La frontera la vigila un guard.** `scripts/check-pimia-boundary.mjs`
+   (dentro de `pnpm check`) falla si algo bajo `features/pimia/` importa de
+   `shared/api/relay*` — o de `shared/api/tauri.ts`, que importa del relay. Por
+   eso el módulo llama a `@tauri-apps/api/core` directamente.

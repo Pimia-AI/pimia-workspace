@@ -166,3 +166,131 @@ un `onSelectX` desde `AppShell` hasta el menú— los hace crecer con cada secci
 nueva. La sección Pimia navega desde el propio menú con `useAppNavigation()`,
 que es el patrón que ya usa `ChannelActivityPopover.tsx`. Resultado: los dos
 ficheros del shell **encogieron** (998 y 997) en vez de crecer.
+
+### 2026-08-08 — Dos barras: Pimia a la izquierda, Buzz a la derecha (Fase 1)
+
+**Por qué.** Es la disposición del plan y la primera corrección de rumbo del
+fundador: la navegación del ERP ocupa la barra izquierda y la de Buzz —canales,
+DM, agentes— se va a la derecha. Montar los módulos del ERP sobre la disposición
+equivocada obligaría a rehacerlos.
+
+**La divergencia estructural, y es la que hay que vigilar en cada cherry-pick.**
+El bloque `sidebar` de shadcn que Buzz copió al repo está escrito para **una
+sola barra**: `SIDEBAR_COOKIE_NAME`, `SIDEBAR_WIDTH_STORAGE_KEY`,
+`SIDEBAR_KEYBOARD_SHORTCUT` y las anchuras eran constantes de módulo, y había un
+único `<SidebarProvider>` en `AppShell.tsx`. Dos barras con ese código
+compartirían estado: se abrirían y redimensionarían juntas.
+
+Ahora el estado va parametrizado por **scope**:
+
+| | |
+|---|---|
+| Fichero nuevo | `desktop/src/shared/ui/sidebar-provider.tsx` — `SidebarScope`, el contexto, el provider y los helpers de anchura |
+| Fichero recortado | `desktop/src/shared/ui/sidebar.tsx` — de 1011 a 774 líneas; reexporta lo de arriba, así que ningún consumidor cambia su import |
+| Los dos scopes | `desktop/src/app/sidebarScopes.ts` |
+
+`sidebar.tsx` estaba **en el techo del trinquete de 1000 líneas** y no podía
+crecer: sacar el provider a su propio fichero no es una preferencia de estilo,
+era la única forma de tocarlo.
+
+`BUZZ_SIDEBAR_SCOPE` **conserva las claves de upstream a propósito**
+(`sidebar_state`, `buzz-sidebar-width`, atajo ⌘S): quien ya usaba la app
+mantiene anchura y estado tras el cambio de lado, y un cherry-pick que toque
+esas constantes sigue casando. `PIMIA_SIDEBAR_SCOPE` estrena las suyas
+(`pimia_sidebar_state`, `pimia-workspace-sidebar-width`, atajo ⌘⇧S).
+
+Tres detalles del montaje que conviene no redescubrir:
+
+1. **Los providers se anidan, no se ponen en paralelo.** El de Buzz es el de
+   siempre y envuelve el shell entero; el de Pimia es interno y solo envuelve su
+   barra, con `className="contents"` para no meter una caja en la fila (las
+   variables CSS —`--sidebar-width`— heredan igual a través de
+   `display: contents`, que es lo que da a cada barra su anchura).
+2. **El botón del chrome sigue siendo el de Buzz.** Se fue al extremo derecho y
+   usa los iconos de panel derecho, pero conserva su `aria-label` («Toggle
+   Sidebar») porque varios e2e lo buscan por nombre exacto. La barra de Pimia no
+   necesita botón ahí: colapsa a iconos (`collapsible="icon"`), nunca se va de
+   pantalla, y trae su propio interruptor en la cabecera.
+3. **La hairline de 1px del `Sidebar` era solo del caso izquierdo**
+   (`group-data-[variant=sidebar]:pr-px`). Ahora va del lado que toca.
+
+Ficheros tocados: `desktop/src/app/AppShell.tsx`,
+`desktop/src/app/AppTopChrome.tsx`,
+`desktop/src/features/sidebar/ui/AppSidebar.tsx` (nueva prop `side`),
+`desktop/src/features/sidebar/ui/AppSidebarPinnedHeader.tsx`,
+`desktop/src/app/navigation/useAppNavigation.ts`,
+`desktop/tests/e2e/smoke.spec.ts` y
+`desktop/tests/e2e/buzz-theme-screenshots.spec.ts` (la barra de Buzz es ahora
+`[data-side="right"]`, y hay dos `[data-sidebar="trigger"]` en el árbol).
+
+Y una divergencia de propina que el ratchet volvió a exigir: el menú fijo de la
+barra de Buzz **navega solo** con `useAppNavigation()` en vez de recibir
+`onSelectAgents`/`onSelectProjects`/`onSelectPulse`/`onSelectWorkflows` cableados
+desde `AppShell`. Es la continuación del patrón que ya introdujo la Fase 0.
+Resultado: `AppShell.tsx` bajó de 998 a 995 líneas montando **dos** barras, y
+`AppSidebar.tsx` de 997 a 989. La entrada «Pimia» sale de esa barra: su sitio es
+la izquierda.
+
+### 2026-08-08 — El auth de escritorio y la superficie de la API de Pimia (Fase 1)
+
+**Por qué.** La app necesita hablar con la API de Pimia como cualquier app de
+partner: OAuth, scopes y un `TokenSet` que sobreviva a un reinicio sin quedar
+al alcance de nadie.
+
+**Superficie nueva, no modificación de upstream**:
+`desktop/src-tauri/src/pimia/` (`vault.rs`, `oauth.rs`, `login.rs`, `api.rs`,
+`commands.rs`) y `desktop/src/features/pimia/`. Se toca upstream solo para
+enchufarlo: `lib.rs` (el módulo, el estado gestionado y seis comandos) y
+`deep_link.rs`.
+
+**Las decisiones que hay que poder defender dentro de seis meses:**
+
+1. **Todo el OAuth y todo el HTTP viven en Rust.** El `access_token` no entra
+   nunca en JavaScript: el webview manda `pimia_api_request` y recibe datos de
+   negocio. De propina esto esquiva el CORS del origen `tauri://`.
+2. **Client público con PKCE S256 y registro dinámico (RFC 7591).** El tenant
+   expone `registration_endpoint` y admite `token_endpoint_auth_method: none`
+   (verificado contra `sdkdemo.taskai.work`), así que la app se da de alta sola
+   en cada tenant y no hay ningún secreto cableado en un binario que el usuario
+   tiene en su disco.
+3. **El retorno del navegador va por loopback, con el esquema propio de
+   respaldo.** El plan decía «deep-link de vuelta» y el esquema
+   `pimia-workspace://oauth/callback` está implementado y registrado — pero
+   **macOS solo enruta esquemas de un `.app` empaquetado**, así que en
+   `tauri dev` no llega nunca. El camino por defecto es
+   `http://127.0.0.1:53682/oauth/callback` (RFC 8252 §7.3, igual de válido), con
+   puertos alternativos 53683/53684. Las dos URIs se registran a la vez en el
+   tenant, así que un build empaquetado puede usar cualquiera sin volver a
+   registrarse.
+4. **El `TokenSet` va al llavero, en el `SecretStore` que ya existía**, bajo la
+   clave `pimia.tenants` del mismo blob que la identidad Nostr — el servicio es
+   el del fork (`pimia-workspace-desktop[-dev]`), así que no hay una segunda
+   entrada ni un segundo aviso del llavero.
+5. **El refresh rota, y eso manda sobre el diseño de `api.rs`.** Reusar un
+   refresh ya rotado se lee como robo y revoca el grant entero, así que el
+   refresco está serializado con un candado de proceso y el conjunto nuevo se
+   persiste **antes** de reintentar.
+6. **Multi-tenant desde el día 1**: un token vale para un tenant. El vault
+   guarda una conexión por tenant y una activa; la caché de TanStack Query
+   cuelga de `["pimia", "data", <tenant>]` para que los datos no se mezclen.
+
+**En `deep_link.rs`**: `handle_deep_link_url` rechazaba cualquier esquema que no
+fuera `buzz`, así que el `pimia-workspace://` que la Fase 0 registró ante macOS
+**estaba muerto**. Ahora se aceptan los dos (los enlaces internos `buzz://` se
+siguen interceptando dentro del webview) y hay un arm `oauth` para el callback.
+El cableado del listener se mudó de `lib.rs` a `deep_link::install()`: es donde
+le toca, y `lib.rs` estaba a ocho líneas del trinquete.
+
+**La frontera, ahora revisable de verdad.** `desktop/scripts/check-pimia-boundary.mjs`
+falla si algo bajo `src/features/pimia/` importa de `shared/api/relay*` (o de
+`shared/api/tauri.ts`, que a su vez importa del relay). Corre dentro de
+`pnpm check`. Una regla que nadie comprueba deja de ser una regla el día que
+alguien necesita «solo un dato» del relay.
+
+### 2026-08-08 — Deuda de formato de la Fase 0
+
+`cargo fmt` tenía pendiente una reindentación en
+`desktop/src-tauri/src/app_state_keyring.rs` desde la Fase 0. El gotcha 6 de
+`CLAUDE.md` explica por qué se coló: el hook de pre-commit que corre
+`just desktop-tauri-fmt` falla en worktrees. Aplicada; `cargo fmt --check` del
+crate Tauri queda en verde.
