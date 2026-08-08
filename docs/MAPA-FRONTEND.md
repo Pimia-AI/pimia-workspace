@@ -96,10 +96,47 @@ importa de `shared/api/relay*`**. El relay guarda los mensajes de canal en
 claro en un Postgres que no administramos: los datos del ERP no pueden pasar
 por ahí.
 
+## 4-bis. La disposición objetivo: Pimia a la izquierda, Buzz a la derecha
+
+⚠️ **Lo que hay hoy NO es la disposición del plan.** El placeholder de la Fase 0
+es *una entrada más* dentro de la barra de Buzz. El objetivo (§ del plan, y
+👤 fundador 2026-08-08) es otro: **la navegación del ERP ocupa la barra
+izquierda y la de Buzz —canales, DM, agentes— se va a la derecha.** Eso es
+reorganizar el shell, no añadir un enlace, y es trabajo de la Fase 1.
+
+Lo verificado sobre cuánto cuesta:
+
+- **A favor**: el `Sidebar` de shadcn ya acepta `side="left" | "right"`
+  (`shared/ui/sidebar.tsx:286`). Mover `AppSidebar` a la derecha es un prop.
+- **En contra, y es el trabajo de verdad**: `SidebarProvider` está escrito para
+  **una sola barra**. Hay exactamente un `<SidebarProvider>` en toda la app
+  (`AppShell.tsx:790`) y las claves de estado son constantes de módulo, no
+  parámetros: `SIDEBAR_COOKIE_NAME = "sidebar_state"`,
+  `SIDEBAR_WIDTH_STORAGE_KEY = "buzz-sidebar-width"`,
+  `SIDEBAR_KEYBOARD_SHORTCUT = "s"`, y la anchura viaja por un único
+  `--sidebar-width`. Dos barras con este código compartirían estado: se
+  abrirían y redimensionarían juntas.
+- **El panel derecho que ya existe no sirve para esto.**
+  `shared/layout/AuxiliaryPanel*` es contextual —hilos de mensajes, perfiles,
+  gestión de canales—, se abre y se cierra sobre el contenido. No es una barra
+  de navegación permanente.
+
+Camino recomendado para la Fase 1: parametrizar `sidebar.tsx` (que es código
+copiado en el repo, no una dependencia) para que cada `SidebarProvider` reciba
+sus propias claves de cookie, `localStorage`, atajo y variable CSS; luego
+montar dos providers en `AppShell`, con `AppSidebar` en `side="right"` y la
+nav del ERP en la izquierda. Es acotado y de una sola vez, pero **es una
+divergencia estructural con upstream** y hay que anotarla en `UPSTREAM.md`
+cuando se haga: `sidebar.tsx` es de los ficheros que upstream toca.
+
 ## 5. La receta: añadir una sección sin tocar el core de mensajería
 
 Verificada: la sección «Pimia» de este repo se hizo exactamente así, y el
 `pnpm check` completo (Biome + trinquete de tamaño + guards) pasa en verde.
+
+Sirve para **añadir una sección a la barra existente**. Es la receta que la
+Fase 1 usará para cada módulo del ERP una vez montada la disposición de dos
+barras de §4-bis; no sustituye a ese trabajo.
 
 **Seis ficheros. Ninguno del core de mensajería.**
 
@@ -204,13 +241,20 @@ en `src/shared/ui/`.
   tema fijo de Pimia — puede que la vía sea publicar el tema de Pimia como tema
   de comunidad en vez de tocar el CSS base.
 
-**El detalle que costará tiempo en la Fase 2:** las variables están en HSL sin
-función, al estilo shadcn clásico (`--primary: 266 85.05% 58.04%`, consumido
-como `hsl(var(--primary))`), y el tema base es Catppuccin Latte.
-`@pimia/design-tokens` emite **OKLCH**. O se convierten los tokens a HSL, o se
-migra el tema de Buzz al formato nuevo de shadcn (que usa `oklch()` directo en
-las variables) y se revisa que las 852 líneas sigan cuadrando. No es difícil,
-pero no es un `find`/`replace`.
+**Decisión de dirección (👤 fundador, 2026-08-08): el tema de Buzz se queda.**
+La estética del workspace es la sobriedad de Buzz, no la de
+`@pimia/design-tokens`. Los tokens OKLCH del panel Vue **no se portan aquí**:
+la llegada de React + shadcn es justamente la ocasión de adoptar un lenguaje
+visual más sobrio.
+
+Consecuencia práctica, y es una buena noticia: la Fase 2 deja de ser una
+migración de tokens. No hay conversión OKLCH → HSL, no se reescriben las 852
+líneas de `theme.css`, no hace falta un paquete de tema. Lo que queda es
+mucho menor: la marca donde toque (nombre, iconos) y, si acaso, un acento
+propio dentro del sistema de variables que ya existe. Cualquier cosa que se
+escriba nueva debe usar las variables de `theme.css` tal cual
+(`bg-background`, `text-muted-foreground`, `border-border`…) en vez de traer
+colores propios — que es lo que hace el placeholder de `features/pimia/`.
 
 ## 7. ¿Hay sistema de plugins? No, y probablemente no hace falta
 
