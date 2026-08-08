@@ -101,6 +101,16 @@ Ficheros: `desktop/src-tauri/tauri.conf.json`,
 `scripts/test-reset-desktop-standalone-state.sh`,
 `scripts/cleanup-instance-agents.sh`.
 
+**Verificado en el primer arranque real** (2026-08-08, con el Buzz del usuario
+corriendo a la vez en la misma máquina): la app creó
+`~/Library/Application Support/es.pimia.workspace.dev/` con su marcador propio
+`identity.pimia-workspace-desktop-dev.main.migrated`; el llavero quedó con dos
+entradas separadas (`buzz-desktop` la ajena, `pimia-workspace-desktop-dev.main`
+la nuestra); la app **generó una identidad Nostr nueva** en vez de importar
+ninguna; y el updater no llegó a cargarse (*«updater unavailable: plugin
+updater not found»* — en dev no está activo, así que no puede apuntar a un
+binario ajeno).
+
 **Tres cosas que conviene no olvidar de este cambio:**
 
 1. **El llavero era el riesgo de verdad, y el identificador de bundle no lo
@@ -116,7 +126,16 @@ Ficheros: `desktop/src-tauri/tauri.conf.json`,
    `xyz.block.buzz.app`, ambas devuelven `None` y no hacen nada. No se han
    tocado: que no encuentren nada es exactamente el comportamiento correcto, y
    dejarlas iguales que upstream abarata los cherry-picks.
-3. **El esquema `buzz://` sigue vivo dentro del código y no pasa nada.** Los
+3. **En `tauri dev` el proceso se sigue llamando `buzz-desktop`, y es correcto.**
+   Ese es el nombre del binario de Cargo (el crate `buzz-desktop`), no el
+   nombre visible de la aplicación. `productName` solo aplica al `.app`
+   empaquetado, y `tauri dev` ejecuta el binario suelto — la propia app lo dice
+   al arrancar: *«macOS notifications disabled because the process is not
+   running from an app bundle»*. Renombrar el crate tocaría rutas, scripts y CI
+   por un beneficio cosmético en modo desarrollo; no compensa. Lo que sí
+   importa —el directorio de datos y el llavero— ya está separado, y se
+   verificó en el primer arranque real.
+4. **El esquema `buzz://` sigue vivo dentro del código y no pasa nada.** Los
    enlaces `buzz://message?…` que la app genera y parsea (`messageLink.ts`,
    `markdown.tsx`, `deep-link.ts`) se interceptan dentro del webview, sin pasar
    por el sistema operativo. Lo único que se cambió es qué esquema **registra**
