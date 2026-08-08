@@ -17,6 +17,7 @@ import { ArrowLeft, User } from "lucide-react";
 
 import { useAppNavigation } from "@/app/navigation/useAppNavigation";
 import type { PimiaEstimateLine } from "@/features/pimia/api/estimates";
+import { formatCents } from "@/features/pimia/lib/money";
 import { useActivePimiaTenant } from "@/features/pimia/hooks/usePimiaAuth";
 import { usePimiaEstimateQuery } from "@/features/pimia/hooks/usePimiaResources";
 import {
@@ -67,23 +68,48 @@ function formatQuantity(line: PimiaEstimateLine) {
   return line.unitName ? `${quantity} ${line.unitName}` : quantity;
 }
 
-function FieldGrid({
+/**
+ * Una tarjeta de datos con sus pares etiqueta-valor, como las dos que el panel
+ * de Pimia pone en la cabecera de un presupuesto.
+ */
+function FieldCard({
   rows,
+  title,
 }: {
   rows: Array<{ label: string; value: ReactNode }>;
+  title: string;
 }) {
   return (
-    <dl className="grid grid-cols-2 gap-x-6 gap-y-4 p-4 sm:grid-cols-3">
-      {rows.map((row) => (
-        <div className="min-w-0 space-y-0.5" key={row.label}>
-          <dt className="text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {row.label}
-          </dt>
-          <dd className="truncate text-sm text-foreground">{row.value}</dd>
-        </div>
-      ))}
-    </dl>
+    <section className="min-w-0 flex-1 rounded-lg border border-border">
+      <h2 className="border-b border-border px-4 py-3 text-sm font-semibold text-foreground">
+        {title}
+      </h2>
+      <dl className="divide-y divide-border">
+        {rows.map((row) => (
+          <div
+            className="flex items-baseline justify-between gap-4 px-4 py-2.5"
+            key={row.label}
+          >
+            <dt className="shrink-0 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {row.label}
+            </dt>
+            <dd className="min-w-0 truncate text-sm text-foreground">
+              {row.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </section>
   );
+}
+
+/** «IVA 21%» o, si el impuesto es de importe fijo, solo su nombre. */
+function taxLabel(tax: { name: string; percent: number | null }) {
+  return tax.percent === null
+    ? tax.name
+    : `${tax.name} ${tax.percent.toLocaleString("es-ES", {
+        maximumFractionDigits: 2,
+      })}%`;
 }
 
 /** El desglose. Cada línea solo aparece si el servidor la manda con valor. */
@@ -173,13 +199,13 @@ export function PimiaEstimateScreen({ estimateId }: { estimateId: string }) {
             title={<span className="font-mono">{estimate.estimateNumber}</span>}
           />
 
-          <section className="shrink-0 rounded-lg border border-border">
-            {/* El cliente no se repite aquí: ya está bajo el número. */}
-            <FieldGrid
+          <div className="flex shrink-0 flex-col gap-4 lg:flex-row">
+            <FieldCard
               rows={[
+                { label: "Número", value: estimate.estimateNumber },
                 { label: "Fecha", value: formatDate(estimate.estimateDate) },
                 {
-                  label: "Válido hasta",
+                  label: "Vencimiento",
                   value: formatDate(estimate.expiryDate),
                 },
                 {
@@ -187,8 +213,17 @@ export function PimiaEstimateScreen({ estimateId }: { estimateId: string }) {
                   value: estimate.referenceNumber ?? "—",
                 },
               ]}
+              title="Presupuesto"
             />
-          </section>
+            <FieldCard
+              rows={[
+                { label: "Cliente", value: estimate.customerName ?? "—" },
+                { label: "Email", value: estimate.customerEmail ?? "—" },
+                { label: "Teléfono", value: estimate.customerPhone ?? "—" },
+              ]}
+              title="Cliente"
+            />
+          </div>
 
           <section className="space-y-3">
             <h2 className="text-sm font-semibold text-foreground">Líneas</h2>
@@ -208,6 +243,9 @@ export function PimiaEstimateScreen({ estimateId }: { estimateId: string }) {
                       </TableHead>
                       <TableHead className="w-32 whitespace-nowrap text-right">
                         Precio
+                      </TableHead>
+                      <TableHead className="w-52 whitespace-nowrap">
+                        Impuestos
                       </TableHead>
                       <TableHead className="w-32 whitespace-nowrap pr-3 text-right">
                         Importe
@@ -235,6 +273,19 @@ export function PimiaEstimateScreen({ estimateId }: { estimateId: string }) {
                           className="py-2.5 font-normal text-muted-foreground"
                           dimZero={false}
                         />
+                        <TableCell className="py-2.5 text-xs text-muted-foreground">
+                          {line.taxes && line.taxes.length > 0
+                            ? line.taxes.map((tax) => (
+                                <span
+                                  className="block whitespace-nowrap tabular-nums"
+                                  key={tax.id}
+                                >
+                                  {taxLabel(tax)}{" "}
+                                  {formatCents(tax.amountCents ?? 0)}
+                                </span>
+                              ))
+                            : "—"}
+                        </TableCell>
                         <PimiaAmountCell
                           cents={line.totalCents}
                           className="py-2.5 pr-3"
@@ -262,7 +313,17 @@ export function PimiaEstimateScreen({ estimateId }: { estimateId: string }) {
                   label="Descuento"
                 />
               ) : null}
-              {estimate.taxCents !== null ? (
+              {/* Uno por uno cuando el servidor los desglosa: el IVA y la
+                  retención de IRPF sumados dan un neto que esconde las dos. */}
+              {estimate.taxes && estimate.taxes.length > 0 ? (
+                estimate.taxes.map((tax) => (
+                  <TotalsRow
+                    amountCents={tax.amountCents ?? 0}
+                    key={tax.id}
+                    label={taxLabel(tax)}
+                  />
+                ))
+              ) : estimate.taxCents !== null ? (
                 <TotalsRow amountCents={estimate.taxCents} label="Impuestos" />
               ) : null}
               <div className="border-t border-border pt-2">

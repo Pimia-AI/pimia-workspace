@@ -47,14 +47,27 @@ molde que la factura hereda:
 1. **Vuelta a la lista** encima del título.
 2. **El número ES el título** (en monoespaciada), con el estado a su lado y el
    cliente debajo; la acción contextual a la derecha.
-3. **Metadatos** en pares etiqueta-valor, sin repetir lo que ya dice la
-   cabecera.
+3. **Dos tarjetas de datos** —documento y cliente— en pares etiqueta-valor,
+   igual que el panel de Pimia.
 4. **Las líneas** en una tabla: concepto y su descripción apagada, cantidad con
-   su unidad, precio y el importe a la derecha.
-5. **El desglose** —base, descuento, impuestos, total— en una caja estrecha a
-   la derecha, alineado con la columna del dinero. Cada fila solo sale si el
-   servidor la manda con valor.
+   su unidad, precio, **los impuestos de la línea** y el importe a la derecha.
+5. **El desglose** en una caja estrecha a la derecha, alineado con la columna
+   del dinero. Cada fila solo sale si el servidor la manda con valor.
 6. **Notas**, si las hay.
+
+⛔ **Los impuestos van uno a uno, nunca sumados.** Un presupuesto español lleva
+a la vez IVA y **retención de IRPF**, que es negativa: el campo `tax` de la API
+es el neto, así que enseñarlo tal cual («Impuestos 150,00 €») esconde los 525
+de IVA y los −375 de retención. Se leen de la colección `taxes` —que trae
+`name`, `percent` y `amount`, y viene tanto en la cabecera como en cada
+línea— y solo se cae al neto si el servidor no la manda.
+
+**La vara es el panel de Pimia**, no la referencia: la misma pantalla en el
+workspace tiene que enseñar **como mínimo** lo que ya enseña el panel del mismo
+tenant, o el desarrollador que llegue notará que le falta algo. De ahí salieron
+la tarjeta de cliente con email y teléfono, el desglose de impuestos y el
+agrupado de miles de `formatCents` (👤 fundador, comparando las dos pantallas
+lado a lado).
 
 ⚠️ **La ficha no recalcula nada.** Los importes se pintan tal como los devuelve
 el servidor, la suma incluida: las invariantes fiscales son suyas y una segunda

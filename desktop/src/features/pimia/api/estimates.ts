@@ -36,6 +36,22 @@ export const ESTIMATE_STATUSES = [
 
 export type PimiaEstimateStatus = (typeof ESTIMATE_STATUSES)[number];
 
+/**
+ * Un impuesto aplicado, con su nombre y su tipo.
+ *
+ * Importa que vayan uno a uno y no sumados: en España un presupuesto lleva a
+ * la vez IVA y **retención de IRPF**, que es negativa. Sumarlos da un neto
+ * («impuestos: 150 €») que esconde los 525 de IVA y los −375 de retención, y
+ * la retención es justo lo que un autónomo mira.
+ */
+export type PimiaEstimateTax = {
+  id: string;
+  name: string;
+  /** Porcentaje; negativo en las retenciones. `null` si es de importe fijo. */
+  percent: number | null;
+  amountCents: number | null;
+};
+
 /** Una línea del presupuesto. Los importes, en céntimos enteros. */
 export type PimiaEstimateLine = {
   id: string;
@@ -47,6 +63,8 @@ export type PimiaEstimateLine = {
   discountCents: number | null;
   taxCents: number | null;
   totalCents: number | null;
+  /** Los impuestos de la línea, cuando el documento los lleva por línea. */
+  taxes: PimiaEstimateTax[] | null;
 };
 
 export type PimiaEstimate = {
@@ -58,7 +76,12 @@ export type PimiaEstimate = {
   expiryDate: string | null;
   customerId: string | null;
   customerName: string | null;
+  /** Solo en el detalle: el índice devuelve del cliente nada más el nombre. */
+  customerEmail: string | null;
+  customerPhone: string | null;
   notes: string | null;
+  /** Los impuestos de la cabecera, desglosados. */
+  taxes: PimiaEstimateTax[] | null;
   /**
    * Las líneas solo vienen en el detalle (`show`), y solo si las hay: el
    * recurso las envuelve en un `when(...)`. `null` es «no se pidieron», que no
@@ -114,6 +137,33 @@ function readQuantity(value: unknown): number | null {
   return null;
 }
 
+/** El porcentaje llega como número o cadena; puede ser negativo (retención). */
+function readPercent(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value.replace(",", "."));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function normalizeTaxes(value: unknown): PimiaEstimateTax[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  return value.map((entry) => {
+    const raw = entry as Record<string, unknown>;
+    return {
+      id: String(raw.id ?? ""),
+      name: text(raw.name) ?? "Impuesto",
+      percent: readPercent(raw.percent),
+      amountCents: readCents(raw.amount),
+    };
+  });
+}
+
 function normalizeLine(raw: Record<string, unknown>): PimiaEstimateLine {
   return {
     id: String(raw.id ?? ""),
@@ -125,6 +175,7 @@ function normalizeLine(raw: Record<string, unknown>): PimiaEstimateLine {
     discountCents: readCents(raw.discount_val),
     taxCents: readCents(raw.tax),
     totalCents: readCents(raw.total),
+    taxes: normalizeTaxes(raw.taxes),
   };
 }
 
@@ -140,7 +191,10 @@ function normalizeEstimate(raw: RawEstimate): PimiaEstimate {
     expiryDate: text(raw.expiry_date),
     customerId: raw.customer_id === undefined ? null : String(raw.customer_id),
     customerName: customer ? text(customer.name) : null,
+    customerEmail: customer ? text(customer.email) : null,
+    customerPhone: customer ? text(customer.phone) : null,
     notes: text(raw.notes),
+    taxes: normalizeTaxes(raw.taxes),
     lines: Array.isArray(items)
       ? items.map((item) => normalizeLine(item as Record<string, unknown>))
       : null,

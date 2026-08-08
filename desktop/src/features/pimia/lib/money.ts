@@ -7,11 +7,22 @@
  * fuera de aquí.
  */
 
+/**
+ * `useGrouping: true` a propósito. El `es-ES` de `Intl` usa `min2` por defecto,
+ * que NO agrupa las cifras de cuatro dígitos: escribiría `2500,00 €` donde el
+ * panel de Pimia —el mismo documento, el mismo tenant— pone `2.500,00 €`. Las
+ * dos formas son correctas en español, pero que el mismo presupuesto se lea
+ * distinto según por dónde lo mires no lo es.
+ *
+ * (`true` equivale a `"always"` desde ES2023; se usa el booleano porque el
+ * `lib` de TypeScript de este repo aún no conoce la cadena.)
+ */
 const EUR_FORMATTER = new Intl.NumberFormat("es-ES", {
   style: "currency",
   currency: "EUR",
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
+  useGrouping: true,
 });
 
 /** Céntimos → `1.234,56 €`. */

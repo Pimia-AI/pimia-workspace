@@ -147,6 +147,8 @@ const CUSTOMERS: RawCustomer[] = [
 
 const ESTIMATES: RawEstimate[] = [
   estimate("133", "PRE-000133", "DRAFT", "2026-08-08", "2026-09-07", "1", 0),
+  // El total sale de sus líneas (16.440 € de base × 1,06), que es el único que
+  // tiene ficha: así la tabla de líneas, el desglose y el total concuerdan.
   estimate(
     "132",
     "PRE-000132",
@@ -154,7 +156,7 @@ const ESTIMATES: RawEstimate[] = [
     "2026-08-05",
     "2026-09-04",
     "7",
-    1_950_000,
+    1_742_640,
   ),
   estimate(
     "131",
@@ -258,7 +260,12 @@ function estimate(
   total: number,
 ): RawEstimate {
   const customer = CUSTOMERS.find((candidate) => candidate.id === customerId);
-  const subTotal = Math.round(total / 1.21);
+  // Un presupuesto español lleva IVA del 21 % y retención de IRPF del 15 %, o
+  // sea que el total es la base × 1,06. Se deriva así para que la aritmética
+  // del mock cuadre con la que la ficha va a pintar: base + IVA − IRPF = total.
+  const subTotal = Math.round(total / 1.06);
+  const vat = Math.round(subTotal * 0.21);
+  const withholding = -Math.round(subTotal * 0.15);
   return {
     id,
     estimate_number: estimateNumber,
@@ -268,7 +275,7 @@ function estimate(
     customer_id: customerId,
     customer: { id: customerId, name: customer?.name ?? "—" },
     sub_total: subTotal,
-    tax: total - subTotal,
+    tax: vat + withholding,
     total,
   };
 }
@@ -451,17 +458,52 @@ export async function installPimiaMock(
           if (!found) {
             return null;
           }
-          // El `show` de la API sí trae las líneas y las notas; el índice, no.
+          // El `show` trae lo que el índice no: líneas, notas, los impuestos
+          // desglosados y el cliente entero (con email y teléfono).
+          const owner = allCustomers.find(
+            (candidate) => candidate.id === found.customer_id,
+          );
+          const vat = Math.round(found.sub_total * 0.21);
+          const withholding = -Math.round(found.sub_total * 0.15);
           return {
             data: {
               ...found,
               reference_number: `OBRA-${found.id}`,
               notes:
                 "Precios válidos salvo variación del coste de materiales. No incluye licencias ni tasas municipales.",
+              customer: owner ?? found.customer,
+              taxes: [
+                {
+                  id: `${found.id}-iva`,
+                  name: "IVA",
+                  percent: 21,
+                  amount: vat,
+                },
+                {
+                  id: `${found.id}-irpf`,
+                  name: "IRPF",
+                  percent: -15,
+                  amount: withholding,
+                },
+              ],
               items: (LINES[found.id] ?? []).map((line, index) => ({
                 ...line,
                 id: `${found.id}-${index + 1}`,
                 estimate_id: found.id,
+                taxes: [
+                  {
+                    id: `${found.id}-${index + 1}-iva`,
+                    name: "IVA",
+                    percent: 21,
+                    amount: Math.round(line.total * 0.21),
+                  },
+                  {
+                    id: `${found.id}-${index + 1}-irpf`,
+                    name: "IRPF",
+                    percent: -15,
+                    amount: -Math.round(line.total * 0.15),
+                  },
+                ],
               })),
             },
           };
