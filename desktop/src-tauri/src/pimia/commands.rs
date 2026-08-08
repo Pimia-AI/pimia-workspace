@@ -76,27 +76,47 @@ fn announce(app: &tauri::AppHandle, status: &PimiaAuthStatus) {
     let _ = app.emit(AUTH_CHANGED_EVENT, status);
 }
 
+/// ⚠️ **`async` y en `spawn_blocking` a propósito, no por costumbre.** Un
+/// comando `fn` de Tauri corre en el **hilo principal**, y leer el llavero puede
+/// bloquear largo —macOS enseña un aviso modal la primera vez—. Con el comando
+/// síncrono, la app se quedaba congelada al arrancar («la aplicación no
+/// responde») porque el frontend pide el estado al montar. Todo lo que toque el
+/// llavero tiene que salir del hilo principal.
 #[tauri::command]
-pub(crate) fn pimia_auth_status() -> Result<PimiaAuthStatus, String> {
-    read_status()
+pub(crate) async fn pimia_auth_status() -> Result<PimiaAuthStatus, String> {
+    off_main_thread(read_status).await
 }
 
 #[tauri::command]
-pub(crate) fn pimia_set_active_tenant(
+pub(crate) async fn pimia_set_active_tenant(
     app: tauri::AppHandle,
     tenant_id: String,
 ) -> Result<PimiaAuthStatus, String> {
-    let mut store = vault::load_vault()?;
-    if store.find(&tenant_id).is_none() {
-        return Err("ese tenant no está conectado".to_string());
-    }
+    let status = off_main_thread(move || {
+        let mut store = vault::load_vault()?;
+        if store.find(&tenant_id).is_none() {
+            return Err("ese tenant no está conectado".to_string());
+        }
 
-    store.active_tenant_id = Some(tenant_id);
-    vault::save_vault(&store)?;
+        store.active_tenant_id = Some(tenant_id);
+        vault::save_vault(&store)?;
+        Ok(status_from(&store))
+    })
+    .await?;
 
-    let status = status_from(&store);
     announce(&app, &status);
     Ok(status)
+}
+
+/// Corre trabajo bloqueante (llavero) fuera del hilo principal.
+async fn off_main_thread<T, F>(work: F) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+    T: Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|error| format!("no se pudo leer el llavero: {error}"))?
 }
 
 /// Cancela la autorización en vuelo, si la hay.

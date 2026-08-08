@@ -388,3 +388,14 @@ Y encima, 31 líneas de `page reload playwright-report/index.html`.
 se deniega justo después de canjear el código, el grant existe en el tenant pero
 no se puede guardar — el peor momento posible. Ese error ya no sube crudo: dice
 qué pasó y qué hacer («Permitir siempre» y volver a conectar).
+
+### 2026-08-08 — Nada que toque el llavero puede correr en el hilo principal
+
+Un comando `#[tauri::command] fn` (síncrono) corre en el **hilo principal**.
+`pimia_auth_status` lo era y leía el llavero, y el frontend lo pide al montar:
+la app se quedaba congelada al arrancar —«la aplicación no responde» en el Dock—
+porque macOS bloquea esa lectura mientras enseña su aviso modal.
+
+Los comandos que tocan el llavero son ahora `async` y hacen el trabajo en
+`tauri::async_runtime::spawn_blocking`. Regla para lo que venga: **si toca el
+llavero, fuera del hilo principal**.
