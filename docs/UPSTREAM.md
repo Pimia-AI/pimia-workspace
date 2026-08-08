@@ -524,3 +524,27 @@ reconciliar cada vez que upstream toque su sistema de insignias.
 
 El lenguaje visual y los componentes compuestos están documentados en
 [`docs/PIMIA-UI.md`](PIMIA-UI.md).
+
+### 2026-08-08 — `gh pr create` abre el PR contra **upstream** si no se le dice el repo
+
+Misma familia que el caso de `post-screenshots.sh`, y con la misma raíz: el
+clon conserva el remoto `upstream` apuntando a `block/buzz`, y `gh` toma el
+repo padre como base por defecto. El síntoma no dice nada de eso:
+
+```
+GraphQL: Head sha can't be blank, Base sha can't be blank,
+No commits between main and claude/<rama>, Head ref must be a branch
+```
+
+Es literal: en `block/buzz` esa rama no existe. Mientras tanto
+`gh api repos/Pimia-AI/pimia-workspace/compare/main...claude/<rama>` responde
+`ahead: 4`, o sea que la rama está bien empujada y el error engaña.
+
+**El remedio es pasar el repo siempre**, que además deja el comando copiable:
+
+```bash
+gh pr create --repo Pimia-AI/pimia-workspace --base main --head claude/<rama> …
+```
+
+(La alternativa, `gh repo set-default Pimia-AI/pimia-workspace`, arregla la
+máquina pero no el comando que quede escrito en un handoff.)
