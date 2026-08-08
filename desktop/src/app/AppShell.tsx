@@ -775,16 +775,6 @@ export function AppShell() {
             onViewHuddleChannel={viewHuddleChannel}
             onVisibilityChange={handleHuddleVisibilityChange}
           >
-            {hasCommunityRail && !isHuddleRoom ? (
-              <CommunityRail
-                activeCommunityId={communitiesHook.activeCommunity?.id ?? null}
-                onAddCommunity={addCommunityDialog.openDialog}
-                onReorderCommunities={communitiesHook.reorderCommunities}
-                onSwitchCommunity={handleSwitchCommunity}
-                onUpdateCommunity={communitiesHook.updateCommunity}
-                communities={communitiesHook.communities}
-              />
-            ) : null}
             <SidebarProvider
               className="relative z-10 min-h-0 min-w-0 flex-1 flex-col overflow-visible"
               data-testid="app-sidebar-layer"
@@ -795,7 +785,6 @@ export function AppShell() {
                   <AppTopChrome
                     canGoBack={canGoBack}
                     canGoForward={canGoForward}
-                    hasCommunityRail={hasCommunityRail}
                     onGoBack={goBack}
                     onGoForward={goForward}
                   />
@@ -945,7 +934,6 @@ export function AppShell() {
                       <RelayConnectionOverlay
                         card={relayConnectionCard}
                         errorMessage={channelsErrorMessage}
-                        hasCommunityRail={hasCommunityRail}
                         isHuddleDrawerOpen={isHuddleDrawerOpen}
                       />
                     ) : null}
@@ -987,6 +975,16 @@ export function AppShell() {
                 />
               </AppProfilePanelProvider>
             </SidebarProvider>
+            {hasCommunityRail && !isHuddleRoom ? (
+              <CommunityRail
+                activeCommunityId={communitiesHook.activeCommunity?.id ?? null}
+                onAddCommunity={addCommunityDialog.openDialog}
+                onReorderCommunities={communitiesHook.reorderCommunities}
+                onSwitchCommunity={handleSwitchCommunity}
+                onUpdateCommunity={communitiesHook.updateCommunity}
+                communities={communitiesHook.communities}
+              />
+            ) : null}
           </AppHuddleShell>
         </AppShellProvider>
       </ChannelNavigationProvider>

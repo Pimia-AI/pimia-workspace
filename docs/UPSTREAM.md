@@ -312,9 +312,36 @@ Lo que queda anotado, por si molesta en uso real:
   36 px. Es comportamiento responsive de upstream, no del shell; el spec
   `project-commit-detail.spec.ts` mide alineación de columnas y se le da una
   ventana donde esa comparación significa algo.
-- **El rail de comunidades sigue a la izquierda.** Es el conmutador de
-  comunidades de **Buzz**, y con la barra de Buzz a la derecha queda encajado
-  contra la del ERP. Lo coherente sería moverlo a la derecha, por fuera de la
-  barra de Buzz — y con él el `RelayConnectionOverlay`, que aparece abajo a la
-  izquierda cuando la barra de Buzz está plegada. **Decisión de disposición del
-  fundador**: no se toca sin su visto bueno.
+- **El `RelayConnectionOverlay` sigue apareciendo abajo a la izquierda** cuando
+  la barra de Buzz está plegada, aunque la tarjeta que muestra viva en el pie de
+  esa barra, que ahora está a la derecha. Se le ha quitado el hueco de 68 px que
+  reservaba para el rail (ya no está ahí), pero cambiarlo de lado es otra
+  decisión de disposición: pendiente del fundador.
+
+### 2026-08-08 — El rail de comunidades se va a la derecha (👤 fundador)
+
+**Por qué.** Es el conmutador de comunidades de **Buzz**. Con la barra de Buzz a
+la derecha, dejarlo en el extremo izquierdo lo encajaba contra la barra del ERP:
+un control de Buzz varado en territorio del ERP. Ahora va **por fuera** de la
+barra de Buzz, pegado al borde derecho de la ventana.
+
+Lo que arrastró el cambio, que es lo que conviene saber para un cherry-pick:
+
+- `AppShell.tsx`: `<CommunityRail>` pasa de delante a detrás del
+  `SidebarProvider`.
+- `AppTopChrome.tsx`: upstream **reducía** el despeje de los semáforos de macOS
+  (`pl-[32px]` en vez de `pl-[80px]`) cuando el rail estaba presente, porque el
+  rail ya ocupaba el extremo izquierdo. Sin rail ahí, la fila de navegación
+  vuelve a despejarlos enteros siempre, y la prop `hasCommunityRail` desaparece.
+- `RelayConnectionOverlay.tsx`: mismo motivo — el hueco de 68 px que se apartaba
+  del rail sobra. La prop desaparece también.
+- `CommunityRail.tsx`: la pastilla del activo cuelga del borde **exterior** del
+  rail (convención Discord/Slack). Con el rail a la derecha ese borde es el
+  derecho: `-left-2.5 rounded-r-full` → `-right-2.5 rounded-l-full`.
+
+El spec `community-rail.spec.ts` tenía un test llamado «clears the macOS traffic
+lights» cuya premisa era que el rail vivía bajo los semáforos. Ya no: se
+reescribe como «se ancla al borde derecho y despeja el chrome», conservando lo
+que sigue valiendo (alineación vertical con la superficie de la app, simetría de
+los insets del rail) y añadiendo lo nuevo (el rail va por fuera de la barra de
+Buzz, y el chrome vuelve a despejar los semáforos enteros).

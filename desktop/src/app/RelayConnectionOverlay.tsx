@@ -11,15 +11,18 @@ import { useSidebar } from "@/shared/ui/sidebar";
 type RelayConnectionOverlayProps = {
   card: ReturnType<typeof useSidebarRelayConnectionCard>;
   errorMessage?: string;
-  hasCommunityRail?: boolean;
   isHuddleDrawerOpen?: boolean;
 };
 
 /**
  * Fixed bottom-left overlay that shows the relay reconnect card when the
  * sidebar is collapsed. When the sidebar is open, the card lives in the
- * sidebar footer instead (and this overlay is hidden). Offsets itself for
- * the community rail (48px) and huddle drawer when present.
+ * sidebar footer instead (and this overlay is hidden). Offsets itself for the
+ * huddle drawer when present.
+ *
+ * Divergencia Pimia: upstream además se apartaba 68 px del rail de comunidades,
+ * que ocupaba el extremo izquierdo. El rail se fue a la derecha con la barra de
+ * Buzz, así que ese hueco sobra.
  *
  * Also surfaces non-unreachable disconnect errors (e.g. auth rejections)
  * when the sidebar is hidden, since those errors are only rendered inside
@@ -28,7 +31,6 @@ type RelayConnectionOverlayProps = {
 export function RelayConnectionOverlay({
   card,
   errorMessage,
-  hasCommunityRail,
   isHuddleDrawerOpen,
 }: RelayConnectionOverlayProps) {
   const { open: sidebarOpen, openMobile } = useSidebar();
@@ -60,7 +62,7 @@ export function RelayConnectionOverlay({
           animate={{ opacity: 1, y: 0 }}
           className={cn(
             "pointer-events-none fixed z-50 w-[284px]",
-            hasCommunityRail ? "left-[68px]" : "left-3",
+            "left-3",
             isHuddleDrawerOpen
               ? "bottom-[calc(var(--buzz-huddle-drawer-height,0px)+12px)]"
               : "bottom-3",
@@ -86,7 +88,7 @@ export function RelayConnectionOverlay({
           animate={{ opacity: 1, y: 0 }}
           className={cn(
             "pointer-events-none fixed z-50 w-[284px]",
-            hasCommunityRail ? "left-[68px]" : "left-3",
+            "left-3",
             isHuddleDrawerOpen
               ? "bottom-[calc(var(--buzz-huddle-drawer-height,0px)+12px)]"
               : "bottom-3",
