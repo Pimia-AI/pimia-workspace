@@ -16,10 +16,17 @@ type RelayConnectionOverlayProps = {
 };
 
 /**
- * Fixed bottom-left overlay that shows the relay reconnect card when the
- * sidebar is collapsed. When the sidebar is open, the card lives in the
- * sidebar footer instead (and this overlay is hidden). Offsets itself for
- * the community rail (48px) and huddle drawer when present.
+ * Fixed bottom overlay that shows the relay reconnect card when the sidebar is
+ * collapsed. When the sidebar is open, the card lives in the sidebar footer
+ * instead (and this overlay is hidden). Offsets itself for the huddle drawer
+ * when present.
+ *
+ * Divergencia Pimia (👤): el aviso vive **abajo a la derecha**, no a la
+ * izquierda. La tarjeta que enseña es la del pie de la barra de Buzz, y esa
+ * barra se fue a la derecha: dejarlo a la izquierda hacía que saltara de un
+ * extremo de la pantalla al otro al plegar la barra. Y por eso se aparta del
+ * rail de comunidades por la derecha (56 px del rail + 12 de aire), donde
+ * upstream se apartaba por la izquierda.
  *
  * Also surfaces non-unreachable disconnect errors (e.g. auth rejections)
  * when the sidebar is hidden, since those errors are only rendered inside
@@ -60,7 +67,7 @@ export function RelayConnectionOverlay({
           animate={{ opacity: 1, y: 0 }}
           className={cn(
             "pointer-events-none fixed z-50 w-[284px]",
-            hasCommunityRail ? "left-[68px]" : "left-3",
+            hasCommunityRail ? "right-[68px]" : "right-3",
             isHuddleDrawerOpen
               ? "bottom-[calc(var(--buzz-huddle-drawer-height,0px)+12px)]"
               : "bottom-3",
@@ -86,7 +93,7 @@ export function RelayConnectionOverlay({
           animate={{ opacity: 1, y: 0 }}
           className={cn(
             "pointer-events-none fixed z-50 w-[284px]",
-            hasCommunityRail ? "left-[68px]" : "left-3",
+            hasCommunityRail ? "right-[68px]" : "right-3",
             isHuddleDrawerOpen
               ? "bottom-[calc(var(--buzz-huddle-drawer-height,0px)+12px)]"
               : "bottom-3",

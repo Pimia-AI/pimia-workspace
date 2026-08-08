@@ -29,6 +29,7 @@ mod models;
 mod native_websocket;
 mod nostr_bind;
 pub mod nostr_convert;
+mod pimia;
 mod prevent_sleep;
 mod ptt_shortcut;
 mod relay;
@@ -306,6 +307,7 @@ pub fn run() {
         .manage(PendingCommunityDeepLinks::default())
         .manage(BuilderlabSession::default())
         .manage(BuilderlabLogin::default())
+        .manage(pimia::PimiaLoginState::default())
         .manage(commands::pairing::PairingHandle::new())
         .manage(terminal_runtime::TerminalSessions::default())
         .setup(move |app| {
@@ -515,15 +517,7 @@ pub fn run() {
             // and on cold start. The single-instance plugin handles forwarding
             // from duplicate launches on Windows/Linux.
             #[cfg(desktop)]
-            {
-                use tauri_plugin_deep_link::DeepLinkExt;
-                let dl_handle = app.handle().clone();
-                app.deep_link().on_open_url(move |event| {
-                    for url in event.urls() {
-                        handle_deep_link_url(&dl_handle, url.as_str());
-                    }
-                });
-            }
+            deep_link::install(app.handle());
 
             // Defer launch-time agent restoration until `apply_workspace` has
             // installed the active workspace relay and identity. Starting here
@@ -616,6 +610,13 @@ pub fn run() {
             terminal_runtime::terminal_focus,
             take_pending_community_deep_link,
             acknowledge_pending_community_deep_link,
+            pimia::pimia_auth_status,
+            pimia::pimia_connect_tenant,
+            pimia::pimia_cancel_connect,
+            pimia::pimia_connect_phase,
+            pimia::pimia_disconnect_tenant,
+            pimia::pimia_set_active_tenant,
+            pimia::pimia_api_request,
             start_builderlab_login,
             cancel_builderlab_login,
             get_builderlab_auth,

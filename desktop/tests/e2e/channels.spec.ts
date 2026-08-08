@@ -2653,11 +2653,15 @@ test("manage channel keeps canvas near the top of the sheet", async ({
   await expect(page.getByTestId("message-timeline")).toHaveCount(0);
   await expect(page.getByTestId("channel-drop-zone")).toHaveCount(0);
   await expect(sheet).toBeVisible();
-  const narrowSheetBox = await sheet.boundingBox();
-  if (!narrowSheetBox) {
-    throw new Error("Expected narrow channel management panel box.");
-  }
-  expect(narrowSheetBox.width).toBeGreaterThan(500);
+  // Con las dos barras de la Fase 1, en una ventana de 820 px el cromo son
+  // 348 px (la del ERP se pliega sola a iconos por debajo de 1100), no los 300
+  // de cuando había una sola barra. Se sondea porque ese plegado va con
+  // transición CSS y medir al vuelo coge la hoja a medio ensanchar. Lo que el
+  // test protege sigue igual: la hoja se queda con el área de contenido entera,
+  // no con una tira.
+  await expect
+    .poll(async () => (await sheet.boundingBox())?.width ?? 0)
+    .toBeGreaterThan(450);
   expect(canvasBox).not.toBeNull();
   expect(nameBox).not.toBeNull();
   expect(canvasBox?.y).toBeLessThan(nameBox?.y);

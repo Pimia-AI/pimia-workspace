@@ -935,8 +935,11 @@ test.describe("community rail", () => {
     await expect(page.getByTestId("community-rail-add")).toBeVisible();
   });
 
-  test("clears the macOS traffic lights", async ({ page }) => {
-    // Spoof macOS so the rail applies its traffic-light top inset.
+  test("se ancla al borde derecho y despeja el chrome", async ({ page }) => {
+    // Divergencia Pimia (👤): el rail es el conmutador de comunidades de Buzz,
+    // así que se fue a la derecha con su barra. Ya no vive bajo los semáforos
+    // de macOS —esa era la razón del test original— pero sigue teniendo que
+    // despejar la altura del chrome y cuadrar con la superficie de la app.
     await page.addInitScript(() => {
       Object.defineProperty(navigator, "platform", { get: () => "MacIntel" });
     });
@@ -944,8 +947,6 @@ test.describe("community rail", () => {
     await seedCommunities(page, [COMMUNITY_A, COMMUNITY_B], COMMUNITY_A.id);
     await page.goto("/");
 
-    // The first community button must start below the traffic-light band
-    // (native controls sit around y<=31 with trafficLightPosition y:24).
     const firstButton = page.getByTestId(
       `community-rail-button-${COMMUNITY_A.id}`,
     );
@@ -965,6 +966,9 @@ test.describe("community rail", () => {
     expect(searchBox).not.toBeNull();
     expect(appSurfaceBox).not.toBeNull();
     expect(contentBox).not.toBeNull();
+
+    // El primer botón arranca por debajo de la barra de chrome, y a la misma
+    // altura a la que empieza la superficie de contenido.
     expect(buttonBox?.y ?? 0).toBeGreaterThanOrEqual(32);
     expect(
       Math.abs((buttonBox?.y ?? 0) - (contentBox?.y ?? 0) - 6),
@@ -980,6 +984,7 @@ test.describe("community rail", () => {
       ),
     ).toBeLessThan(0.5);
 
+    // El rail sigue centrando sus botones.
     const leftInset = (buttonBox?.x ?? 0) - (railBox?.x ?? 0);
     const rightInset =
       (railBox?.x ?? 0) +
@@ -987,18 +992,22 @@ test.describe("community rail", () => {
       ((buttonBox?.x ?? 0) + (buttonBox?.width ?? 0));
     expect(Math.abs(leftInset - 10)).toBeLessThan(0.5);
     expect(Math.abs(leftInset - rightInset)).toBeLessThan(0.5);
-    const visibleRightGap =
-      (searchBox?.x ?? 0) - ((buttonBox?.x ?? 0) + (buttonBox?.width ?? 0));
-    expect(Math.abs(leftInset - visibleRightGap)).toBeLessThan(0.5);
 
-    // With the rail visible, the top-chrome controls (sidebar toggle, back/
-    // forward) sit just past the traffic lights near the rail edge — not
-    // shifted far right by a redundant traffic-light offset.
+    // Y va **por fuera** de la barra de Buzz: pegado al borde derecho de la
+    // ventana, con la barra —y su búsqueda— hacia dentro.
+    expect(railBox?.x ?? 0).toBeGreaterThan(searchBox?.x ?? 0);
+    expect((railBox?.x ?? 0) + (railBox?.width ?? 0)).toBeGreaterThanOrEqual(
+      (appSurfaceBox?.x ?? 0) + (appSurfaceBox?.width ?? 0) - 0.5,
+    );
+
+    // Con el rail fuera del extremo izquierdo, la fila de navegación del chrome
+    // vuelve a despejar los semáforos enteros: ni encima de ellos ni corrida.
     const toggle = page
       .locator('[data-testid="app-top-chrome"] button')
       .first();
     const toggleBox = await toggle.boundingBox();
     expect(toggleBox).not.toBeNull();
+    expect(toggleBox?.x ?? 0).toBeGreaterThanOrEqual(72);
     expect(toggleBox?.x ?? 0).toBeLessThan(120);
   });
 

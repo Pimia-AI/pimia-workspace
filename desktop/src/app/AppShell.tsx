@@ -92,6 +92,8 @@ import { ChannelNavigationProvider } from "@/shared/context/ChannelNavigationCon
 import { hasPrimaryShortcutModifier } from "@/shared/lib/platform";
 import { useMessageDeepLinks } from "@/shared/useMessageDeepLinks";
 import { SidebarProvider } from "@/shared/ui/sidebar";
+import { BUZZ_SIDEBAR_SCOPE } from "@/app/sidebarScopes";
+import { PimiaSidebar } from "@/features/pimia/ui/PimiaSidebar";
 import { RelayConnectionOverlay } from "@/app/RelayConnectionOverlay";
 import { useSidebarRelayConnectionCard } from "@/features/sidebar/ui/useSidebarRelayConnectionCard";
 import { AppShellTrayMenu } from "@/app/useAppShellTrayMenu";
@@ -134,14 +136,10 @@ export function AppShell() {
   const queryClient = useQueryClient();
   useManagedAgentRuntimeReconciliation(communitiesHook.communities); // sync storage snapshot
   const {
-    goAgents,
     goChannel,
     goHome,
     goNewMessage,
-    goProjects,
-    goPulse,
     goSettings,
-    goWorkflows,
     closeSettings,
     openSearchHit,
   } = useAppNavigation();
@@ -777,26 +775,16 @@ export function AppShell() {
             onViewHuddleChannel={viewHuddleChannel}
             onVisibilityChange={handleHuddleVisibilityChange}
           >
-            {hasCommunityRail && !isHuddleRoom ? (
-              <CommunityRail
-                activeCommunityId={communitiesHook.activeCommunity?.id ?? null}
-                onAddCommunity={addCommunityDialog.openDialog}
-                onReorderCommunities={communitiesHook.reorderCommunities}
-                onSwitchCommunity={handleSwitchCommunity}
-                onUpdateCommunity={communitiesHook.updateCommunity}
-                communities={communitiesHook.communities}
-              />
-            ) : null}
             <SidebarProvider
               className="relative z-10 min-h-0 min-w-0 flex-1 flex-col overflow-visible"
               data-testid="app-sidebar-layer"
+              scope={BUZZ_SIDEBAR_SCOPE}
             >
               <AppProfilePanelProvider>
                 {!settingsOpen && !isHuddleRoom ? (
                   <AppTopChrome
                     canGoBack={canGoBack}
                     canGoForward={canGoForward}
-                    hasCommunityRail={hasCommunityRail}
                     onGoBack={goBack}
                     onGoForward={goForward}
                   />
@@ -839,6 +827,15 @@ export function AppShell() {
                   </div>
                 ) : (
                   <div className="relative flex min-h-0 flex-1 overflow-visible">
+                    {!isHuddleRoom ? <PimiaSidebar /> : null}
+                    <AppShellChannelSurface
+                      isHuddleRoom={isHuddleRoom}
+                      isHuddleRoomStarting={isHuddleRoomStarting}
+                      mainInsetRef={mainInsetRef}
+                      terminal={<TerminalBootstrap {...terminalContext} />}
+                    >
+                      <Outlet />
+                    </AppShellChannelSurface>
                     {!isHuddleRoom ? (
                       <AppSidebar
                         activeCommunity={communitiesHook.activeCommunity}
@@ -893,16 +890,12 @@ export function AppShell() {
                             });
                           await goChannel(directMessage.id);
                         }}
-                        onSelectAgents={() => void goAgents()}
                         onSelectChannel={handleSidebarChannelSelect}
                         onOpenSearchResult={handleOpenSearchResult}
                         searchChannels={channels}
                         searchFocusRequest={searchFocusRequest}
                         onSelectHome={() => void goHome()}
-                        onSelectProjects={() => void goProjects()}
-                        onSelectPulse={() => void goPulse()}
                         onSelectSettings={handleOpenSettings}
-                        onSelectWorkflows={() => void goWorkflows()}
                         onSetPresenceStatus={(status) =>
                           presenceSession.setStatus(status)
                         }
@@ -934,16 +927,9 @@ export function AppShell() {
                         starredChannelIds={starredChannelIds}
                         onStarChannel={starChannel}
                         onUnstarChannel={unstarChannel}
+                        side="right"
                       />
                     ) : null}
-                    <AppShellChannelSurface
-                      isHuddleRoom={isHuddleRoom}
-                      isHuddleRoomStarting={isHuddleRoomStarting}
-                      mainInsetRef={mainInsetRef}
-                      terminal={<TerminalBootstrap {...terminalContext} />}
-                    >
-                      <Outlet />
-                    </AppShellChannelSurface>
                     {!isHuddleRoom ? (
                       <RelayConnectionOverlay
                         card={relayConnectionCard}
@@ -990,6 +976,16 @@ export function AppShell() {
                 />
               </AppProfilePanelProvider>
             </SidebarProvider>
+            {hasCommunityRail && !isHuddleRoom ? (
+              <CommunityRail
+                activeCommunityId={communitiesHook.activeCommunity?.id ?? null}
+                onAddCommunity={addCommunityDialog.openDialog}
+                onReorderCommunities={communitiesHook.reorderCommunities}
+                onSwitchCommunity={handleSwitchCommunity}
+                onUpdateCommunity={communitiesHook.updateCommunity}
+                communities={communitiesHook.communities}
+              />
+            ) : null}
           </AppHuddleShell>
         </AppShellProvider>
       </ChannelNavigationProvider>

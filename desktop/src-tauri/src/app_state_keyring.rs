@@ -72,10 +72,7 @@ mod tests {
             "identity.migrated"
         );
         assert_eq!(
-            migration_marker_name(
-                "pimia-workspace-desktop-dev.example",
-                "identity.migrated"
-            ),
+            migration_marker_name("pimia-workspace-desktop-dev.example", "identity.migrated"),
             "identity.pimia-workspace-desktop-dev.example.migrated"
         );
     }

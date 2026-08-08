@@ -134,9 +134,12 @@ function CommunityButton({
               {...dragListeners}
             >
               {isActive ? (
+                // Divergencia Pimia: la pastilla de activo cuelga del borde
+                // exterior del rail, el que da a la ventana. Con el rail a la
+                // derecha ese borde es el derecho, no el izquierdo.
                 <span
                   aria-hidden="true"
-                  className="absolute -left-2.5 h-5 w-1 rounded-r-full bg-primary"
+                  className="absolute -right-2.5 h-5 w-1 rounded-l-full bg-primary"
                   data-testid={`community-rail-active-${community.id}`}
                 />
               ) : null}
