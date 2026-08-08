@@ -1,6 +1,7 @@
 // biome-ignore format: keep compact to stay within file size limit
 import * as React from "react";
 import { FeatureGate } from "@/shared/features";
+import type { AppView } from "@/app/AppShell.helpers";
 import { SidebarDndContext } from "@/features/sidebar/ui/SidebarDnd";
 
 import type { LeaveCommunityResult } from "@/features/communities/leaveCommunity";
@@ -96,14 +97,11 @@ type AppSidebarProps = {
   selfPresenceStatus: PresenceStatus;
   errorMessage?: string;
   selectedChannelId: string | null;
-  selectedView:
-    | "home"
-    | "channel"
-    | "messages"
-    | "agents"
-    | "workflows"
-    | "pulse"
-    | "projects";
+  // Divergencia Pimia: era una copia literal de la unión de `AppView`. Con el
+  // tipo importado, añadir una sección se hace en un solo sitio y este fichero
+  // —que estaba justo en el techo de 1000 líneas del ratchet— deja de crecer
+  // cada vez.
+  selectedView: AppView;
   unreadChannelCounts: ReadonlyMap<string, number>;
   unreadChannelIds: ReadonlySet<string>;
   previewActivityChannelIds: ReadonlySet<string>;

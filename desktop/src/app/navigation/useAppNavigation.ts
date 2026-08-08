@@ -68,6 +68,17 @@ export function useAppNavigation() {
     [commitNavigation],
   );
 
+  const goPimia = React.useCallback(
+    (behavior?: NavigationBehavior) =>
+      commitNavigation(
+        {
+          to: "/pimia",
+        },
+        behavior,
+      ),
+    [commitNavigation],
+  );
+
   const goPulse = React.useCallback(
     (behavior?: NavigationBehavior) =>
       commitNavigation(
@@ -319,6 +330,7 @@ export function useAppNavigation() {
     goForumPost,
     goHome,
     goNewMessage,
+    goPimia,
     goProject,
     goProjects,
     goPulse,

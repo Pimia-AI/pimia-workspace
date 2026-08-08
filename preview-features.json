@@ -2,6 +2,13 @@
   "version": 1,
   "features": [
     {
+      "id": "pimia",
+      "name": "Pimia",
+      "description": "Panel del ERP de Pimia dentro del workspace",
+      "defaultEnabled": true,
+      "platforms": ["desktop"]
+    },
+    {
       "id": "workflows",
       "name": "Workflows",
       "description": "YAML-defined automations with approval gates",

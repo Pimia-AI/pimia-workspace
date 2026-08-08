@@ -1,5 +1,7 @@
-import { Activity, Bot, FolderGit2, Inbox, Zap } from "lucide-react";
+import { Activity, Bot, FolderGit2, Inbox, Receipt, Zap } from "lucide-react";
 
+import type { AppView } from "@/app/AppShell.helpers";
+import { useAppNavigation } from "@/app/navigation/useAppNavigation";
 import { TopbarSearch } from "@/features/search/ui/TopbarSearch";
 import { FeatureGate } from "@/shared/features";
 import type { Channel, SearchHit } from "@/shared/api/types";
@@ -12,14 +14,8 @@ import {
 } from "@/shared/ui/sidebar";
 import { SidebarMenuLabel } from "@/shared/ui/sidebar-menu-label";
 
-type SidebarSelectedView =
-  | "home"
-  | "channel"
-  | "messages"
-  | "agents"
-  | "workflows"
-  | "pulse"
-  | "projects";
+// Divergencia Pimia: era una copia literal de la unión de `AppView`.
+type SidebarSelectedView = AppView;
 
 type AppSidebarPinnedHeaderProps = {
   channelLabels: Record<string, string>;
@@ -89,6 +85,12 @@ export function AppSidebarPrimaryMenu({
   onSelectWorkflows,
   selectedView,
 }: AppSidebarPrimaryMenuProps) {
+  // Divergencia Pimia: las secciones propias navegan desde aquí en vez de
+  // recibir un `onSelectX` cableado en `AppShell`. Es el patrón que ya usa
+  // `ChannelActivityPopover`, y evita que cada sección nueva engorde
+  // `AppShell.tsx` y `AppSidebar.tsx`, que están en el techo del ratchet.
+  const { goPimia } = useAppNavigation();
+
   return (
     <SidebarHeader
       className="relative z-40 cursor-default select-none px-2 pb-0 pt-0"
@@ -124,6 +126,20 @@ export function AppSidebarPrimaryMenu({
             </SidebarMenuBadge>
           ) : null}
         </SidebarMenuItem>
+        <FeatureGate feature="pimia">
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              data-testid="open-pimia-view"
+              isActive={selectedView === "pimia"}
+              onClick={() => void goPimia()}
+              tooltip="Pimia"
+              type="button"
+            >
+              <Receipt className="h-4 w-4" />
+              <SidebarMenuLabel>Pimia</SidebarMenuLabel>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </FeatureGate>
         <FeatureGate feature="pulse">
           <SidebarMenuItem>
             <SidebarMenuButton
