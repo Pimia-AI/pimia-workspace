@@ -476,10 +476,24 @@ El arreglo es pedirle a git las dos rutas en el mismo formato — correcto desde
 cualquier directorio:
 
 ```bash
-read -r GIT_DIR GIT_COMMON_DIR < <(git rev-parse --path-format=absolute --git-dir --git-common-dir | tr '\n' ' ')
+GIT_DIR=$(git rev-parse --path-format=absolute --git-dir 2>/dev/null)
+GIT_COMMON_DIR=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
 ```
 
-**Queda anotado y sin aplicar a propósito**: cambiarlo devuelve el checkout
-principal al servicio `pimia-workspace-desktop-dev`, donde el vault está vacío,
-así que el primer arranque tras el arreglo pedirá reconectar Pimia una vez. Es
-una decisión de cuándo pagarlo, no de si.
+`--path-format` pide git 2.31+. Si no está, las dos variables salen vacías, el
+bloque de worktree no entra y **dos instancias en paralelo colisionarían** en el
+directorio de datos y en `tauri-plugin-single-instance`; por eso el caso avisa
+por `stderr` en vez de degradar en silencio.
+
+**Comprobado en los dos lados** —lo que fallaba era justo que solo se había
+mirado uno—: desde `pimia-workspace/desktop` no etiqueta nada
+(`es.pimia.workspace.dev`, «Pimia Workspace Dev»), y desde
+`.claude/worktrees/<x>/desktop` sigue etiquetando
+(`es.pimia.workspace.dev.claude-<x>`, «Pimia Workspace Dev (<x>)»).
+
+**El peaje, pagado una vez.** Con el arreglo, el checkout principal vuelve al
+servicio `pimia-workspace-desktop-dev.main` —el que fija el comando de arranque
+documentado con `${BUZZ_INSTANCE_SLUG:-main}`—, que tiene identidad pero **no**
+`pimia.tenants`. O sea: la identidad Nostr se conserva y no hay que rehacer el
+onboarding de Buzz, pero **hay que reconectar Pimia una vez**. A cambio, la
+conexión deja de evaporarse en cada cambio de rama, que era el problema.

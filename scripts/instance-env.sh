@@ -34,9 +34,19 @@ unset VITE_DEV_BRANCH
 # Worktree detection: compare --git-dir to --git-common-dir. In the main
 # working tree these are identical; in any worktree (whether under .worktrees/,
 # .claude/worktrees/, or elsewhere on disk) they differ.
+#
+# Divergencia Pimia: `--path-format=absolute` no es cosmético. Sin él git
+# devuelve `--git-dir` absoluto y `--git-common-dir` relativo en cuanto el CWD
+# es un subdirectorio —y este fichero se sourcea desde `desktop/`—, así que el
+# checkout principal se tomaba por worktree y **cada rama estrenaba servicio de
+# llavero**: identidad Nostr nueva y vault de Pimia vacío en cada cambio de
+# rama. Requiere git 2.31+; si no está, se avisa y no se etiqueta.
 if git rev-parse --is-inside-work-tree &>/dev/null; then
-    GIT_DIR=$(git rev-parse --git-dir)
-    GIT_COMMON_DIR=$(git rev-parse --git-common-dir 2>/dev/null)
+    GIT_DIR=$(git rev-parse --path-format=absolute --git-dir 2>/dev/null)
+    GIT_COMMON_DIR=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+    if [[ -z "$GIT_DIR" || -z "$GIT_COMMON_DIR" ]]; then
+        echo "⚠ git sin --path-format (¿anterior a 2.31?): no se etiqueta el worktree" >&2
+    fi
     if [[ -n "$GIT_COMMON_DIR" && "$GIT_DIR" != "$GIT_COMMON_DIR" ]]; then
         BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
         export BUZZ_WORKTREE_LABEL="${BRANCH_NAME##*/}"
