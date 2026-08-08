@@ -41,6 +41,19 @@ function emptyLine(id: number): DraftLine {
   return { id, name: "", quantity: "1", price: "" };
 }
 
+/**
+ * Lo que suma una línea, para verlo mientras se escribe. Una raya mientras no
+ * se pueda calcular: un cero inventado se confunde con un precio de cero.
+ */
+function lineAmount(line: DraftLine) {
+  const priceCents = parseAmountToCents(line.price);
+  const quantity = Number.parseFloat(line.quantity.replace(",", "."));
+  if (priceCents === null || !Number.isFinite(quantity) || quantity <= 0) {
+    return "—";
+  }
+  return formatCents(Math.round(priceCents * quantity));
+}
+
 function isoDate(offsetDays = 0) {
   const date = new Date();
   date.setDate(date.getDate() + offsetDays);
@@ -125,8 +138,15 @@ export function PimiaEstimateCreateDialog({
 
           <div className="space-y-4 py-4">
             <div className="space-y-2">
+              <div className="flex items-center gap-2 px-1 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <span className="flex-1">Concepto</span>
+                <span className="w-20">Cantidad</span>
+                <span className="w-28">Precio</span>
+                <span className="w-24 text-right">Importe</span>
+                <span className="w-9" />
+              </div>
               {lines.map((line, index) => (
-                <div className="flex items-start gap-2" key={line.id}>
+                <div className="flex items-center gap-2" key={line.id}>
                   <Input
                     aria-label={`Concepto de la línea ${index + 1}`}
                     className="flex-1"
@@ -174,6 +194,9 @@ export function PimiaEstimateCreateDialog({
                     placeholder="0,00 €"
                     value={line.price}
                   />
+                  <span className="w-24 text-right text-sm tabular-nums text-muted-foreground">
+                    {lineAmount(line)}
+                  </span>
                   <Button
                     aria-label={`Quitar la línea ${index + 1}`}
                     disabled={lines.length === 1}
@@ -206,29 +229,31 @@ export function PimiaEstimateCreateDialog({
               </Button>
             </div>
 
-            <div className="flex items-center justify-between gap-4">
+            <div className="flex flex-wrap items-end justify-between gap-4 rounded-lg border border-border bg-muted/30 px-4 py-3">
               <label
-                className="flex items-center gap-2 text-sm text-muted-foreground"
+                className="flex flex-col gap-1.5 text-2xs font-semibold uppercase tracking-wide text-muted-foreground"
                 htmlFor="pimia-estimate-expiry"
               >
                 Válido hasta
                 <Input
-                  className="w-40"
+                  className="h-9 w-40"
                   id="pimia-estimate-expiry"
                   onChange={(event) => setExpiryDate(event.target.value)}
                   type="date"
                   value={expiryDate}
                 />
               </label>
-              <span className="text-sm text-muted-foreground">
-                Base imponible{" "}
-                <span
-                  className="font-medium tabular-nums text-foreground"
+              <div className="space-y-0.5 text-right">
+                <p className="text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Base imponible
+                </p>
+                <p
+                  className="text-lg font-medium tabular-nums text-foreground"
                   data-testid="pimia-estimate-subtotal"
                 >
                   {formatCents(subtotalCents)}
-                </span>
-              </span>
+                </p>
+              </div>
             </div>
 
             <p className="text-xs text-muted-foreground">

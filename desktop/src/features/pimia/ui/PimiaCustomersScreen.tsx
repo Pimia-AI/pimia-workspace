@@ -1,24 +1,35 @@
 /**
  * Clientes — el primer paso del corte vertical de la Fase 1
  * (clientes → detalle → presupuestos).
+ *
+ * Misma anatomía que Presupuestos: cabecera, fila de filtros, tabla densa y
+ * pie con el recuento. Aquí la fila entera es el enlace al detalle, así que va
+ * como botón y no como celda con enlace dentro.
  */
 
 import * as React from "react";
-import { Search } from "lucide-react";
 
 import { useAppNavigation } from "@/app/navigation/useAppNavigation";
-import { formatCents } from "@/features/pimia/lib/money";
 import { useActivePimiaTenant } from "@/features/pimia/hooks/usePimiaAuth";
 import { usePimiaCustomersQuery } from "@/features/pimia/hooks/usePimiaResources";
+import { PimiaAmountCell } from "@/features/pimia/ui/PimiaAmountCell";
+import { PimiaFilterBar } from "@/features/pimia/ui/PimiaFilterBar";
+import { PimiaPageHeader } from "@/features/pimia/ui/PimiaPageHeader";
+import { PimiaPagination } from "@/features/pimia/ui/PimiaPagination";
 import {
   PimiaEmpty,
   PimiaErrorState,
   PimiaNotConnected,
   PimiaRowsSkeleton,
 } from "@/features/pimia/ui/PimiaStates";
-import { Button } from "@/shared/ui/button";
-import { Input } from "@/shared/ui/input";
-import { PageHeader } from "@/shared/ui/PageHeader";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/shared/ui/table";
 
 const PAGE_SIZE = 25;
 
@@ -39,7 +50,7 @@ export function PimiaCustomersScreen() {
     return () => clearTimeout(timer);
   }, [searchInput]);
 
-  const query = usePimiaCustomersQuery({ page, limit: PAGE_SIZE, search });
+  const query = usePimiaCustomersQuery({ limit: PAGE_SIZE, page, search });
 
   if (!tenant) {
     return <PimiaNotConnected />;
@@ -47,32 +58,21 @@ export function PimiaCustomersScreen() {
 
   const customers = query.data?.customers ?? [];
   const lastPage = query.data?.pagination?.lastPage ?? 1;
+  const totalCount = query.data?.totalCount ?? null;
 
   return (
-    <div className="flex h-full flex-col gap-4 overflow-y-auto p-6">
-      <PageHeader
-        description={
-          query.data?.totalCount !== null &&
-          query.data?.totalCount !== undefined
-            ? `${query.data.totalCount} en ${tenant.label}`
-            : tenant.label
-        }
+    <div className="flex h-full flex-col gap-5 overflow-y-auto p-6">
+      <PimiaPageHeader
+        description="La cartera del tenant y lo que cada cliente tiene pendiente."
         title="Clientes"
       />
 
-      <div className="relative">
-        <Search
-          aria-hidden="true"
-          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-        />
-        <Input
-          className="pl-9"
-          data-testid="pimia-customer-search"
-          onChange={(event) => setSearchInput(event.target.value)}
-          placeholder="Buscar por nombre o email"
-          value={searchInput}
-        />
-      </div>
+      <PimiaFilterBar
+        onSearchChange={setSearchInput}
+        searchPlaceholder="Buscar por nombre o email"
+        searchTestId="pimia-customer-search"
+        searchValue={searchInput}
+      />
 
       {query.isPending ? <PimiaRowsSkeleton /> : null}
       {query.isError ? (
@@ -80,66 +80,69 @@ export function PimiaCustomersScreen() {
       ) : null}
 
       {query.isSuccess && customers.length === 0 ? (
-        <PimiaEmpty>
-          {search
-            ? `Ningún cliente coincide con «${search}».`
-            : "Este tenant todavía no tiene clientes."}
-        </PimiaEmpty>
+        <PimiaEmpty
+          description={
+            search
+              ? `Ningún cliente coincide con «${search}».`
+              : "Los clientes que des de alta en Pimia aparecerán aquí."
+          }
+          title={search ? "Sin coincidencias" : "Todavía no hay clientes"}
+        />
       ) : null}
 
       {customers.length > 0 ? (
-        <ul className="divide-y divide-border rounded-lg border border-border">
-          {customers.map((customer) => (
-            <li key={customer.id}>
-              <button
-                className="flex w-full items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-muted/50"
-                data-testid={`pimia-customer-${customer.id}`}
-                onClick={() => void goPimiaCustomer(customer.id)}
-                type="button"
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium text-foreground">
-                    {customer.name}
-                  </span>
-                  <span className="block truncate text-xs text-muted-foreground">
-                    {customer.email ?? customer.companyName ?? "—"}
-                  </span>
-                </span>
-                <span className="shrink-0 text-right">
-                  <span className="block text-sm tabular-nums text-foreground">
-                    {formatCents(customer.dueAmountCents ?? 0)}
-                  </span>
-                  <span className="block text-2xs text-muted-foreground">
-                    pendiente
-                  </span>
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-
-      {lastPage > 1 ? (
-        <div className="flex items-center justify-between gap-2">
-          <Button
-            disabled={page <= 1 || query.isFetching}
-            onClick={() => setPage((current) => Math.max(1, current - 1))}
-            size="sm"
-            variant="outline"
-          >
-            Anterior
-          </Button>
-          <span className="text-xs text-muted-foreground">
-            Página {page} de {lastPage}
-          </span>
-          <Button
-            disabled={page >= lastPage || query.isFetching}
-            onClick={() => setPage((current) => current + 1)}
-            size="sm"
-            variant="outline"
-          >
-            Siguiente
-          </Button>
+        <div className="overflow-hidden rounded-lg border border-border">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                {/* El nombre se queda con el sobrante; las demás miden lo que
+                    mide su contenido. */}
+                <TableHead className="w-full pl-3">Cliente</TableHead>
+                <TableHead>Contacto</TableHead>
+                <TableHead className="w-40">NIF / CIF</TableHead>
+                <TableHead className="w-40 pr-3 text-right">
+                  Pendiente
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {customers.map((customer) => (
+                <TableRow className="group" key={customer.id}>
+                  <TableCell className="max-w-0 truncate pl-3">
+                    {/* El nombre es el enlace al detalle: un botón de verdad,
+                        para que el teclado llegue igual que el ratón. */}
+                    <button
+                      className="max-w-full truncate rounded-sm text-left font-medium text-foreground outline-hidden group-hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                      data-testid={`pimia-customer-${customer.id}`}
+                      onClick={() => void goPimiaCustomer(customer.id)}
+                      type="button"
+                    >
+                      {customer.name}
+                    </button>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">
+                    {customer.email ?? customer.phone ?? "—"}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap font-mono text-muted-foreground">
+                    {customer.taxId ?? "—"}
+                  </TableCell>
+                  <PimiaAmountCell
+                    cents={customer.dueAmountCents}
+                    className="pr-3"
+                  />
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <PimiaPagination
+            isBusy={query.isFetching}
+            lastPage={lastPage}
+            onPageChange={setPage}
+            page={page}
+            pageSize={PAGE_SIZE}
+            shown={customers.length}
+            total={totalCount}
+          />
         </div>
       ) : null}
     </div>
