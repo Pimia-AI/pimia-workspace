@@ -19,10 +19,22 @@ use crate::pimia::vault::TokenSet;
 /// Los permisos que pide el workspace. Mínimo indispensable para el corte
 /// vertical de la Fase 1 (clientes → detalle → presupuestos); cada módulo
 /// nuevo añade el suyo aquí y el usuario lo ve en la pantalla de consentimiento.
+///
+/// `invoices:write` no es del módulo de facturas, que todavía no existe: lo
+/// exige **convertir un presupuesto en factura**. El guard de la API trata esa
+/// acción como una escritura en DOS dominios (`config/api_guard.php`,
+/// `cross_domain_writes`), porque crea una factura de verdad —borrador y sin
+/// numerar— con un token que solo hablaba de presupuestos. Sin este scope, la
+/// acción responde 403 y la ficha ofrece volver a autorizar.
+///
+/// ⚠️ Añadir un permiso aquí **invalida los grants ya concedidos**: el que ya
+/// estaba conectado sigue con los suyos hasta que vuelva a autorizar. Por eso
+/// la UI comprueba `tenant.scopes` antes de prometer una acción.
 pub(crate) const REQUESTED_SCOPES: &[&str] = &[
     "customers:read",
     "estimates:read",
     "estimates:write",
+    "invoices:write",
     "items:read",
 ];
 
