@@ -6,9 +6,9 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 export HOME="$tmp/home"
 export BUZZ_TEST_PLATFORM=Darwin
-mkdir -p "$HOME/Library/Application Support/xyz.block.buzz.app.dev.example"
-mkdir -p "$HOME/Library/Application Support/xyz.block.buzz.app.dev.other"
-mkdir -p "$HOME/Library/Application Support/xyz.block.buzz.app"
+mkdir -p "$HOME/Library/Application Support/es.pimia.workspace.dev.example"
+mkdir -p "$HOME/Library/Application Support/es.pimia.workspace.dev.other"
+mkdir -p "$HOME/Library/Application Support/es.pimia.workspace"
 mkdir -p "$HOME/.buzz-dev"
 touch "$HOME/.buzz-dev/keep"
 mkdir -p "$tmp/bin"
@@ -21,16 +21,16 @@ chmod +x "$tmp/bin/security"
 export PATH="$tmp/bin:$PATH"
 
 "$repo_root/scripts/reset-desktop-standalone-state.sh" \
-    xyz.block.buzz.app.dev.example buzz-desktop-dev.example
+    es.pimia.workspace.dev.example pimia-workspace-desktop-dev.example
 
-[[ ! -e "$HOME/Library/Application Support/xyz.block.buzz.app.dev.example" ]]
-[[ -d "$HOME/Library/Application Support/xyz.block.buzz.app.dev.other" ]]
-[[ -d "$HOME/Library/Application Support/xyz.block.buzz.app" ]]
+[[ ! -e "$HOME/Library/Application Support/es.pimia.workspace.dev.example" ]]
+[[ -d "$HOME/Library/Application Support/es.pimia.workspace.dev.other" ]]
+[[ -d "$HOME/Library/Application Support/es.pimia.workspace" ]]
 [[ -f "$HOME/.buzz-dev/keep" ]]
-grep -Fx -- "delete-generic-password -s buzz-desktop-dev.example" "$HOME/security-calls" >/dev/null
+grep -Fx -- "delete-generic-password -s pimia-workspace-desktop-dev.example" "$HOME/security-calls" >/dev/null
 
 if "$repo_root/scripts/reset-desktop-standalone-state.sh" \
-    xyz.block.buzz.app buzz-desktop >/dev/null 2>&1; then
+    es.pimia.workspace pimia-workspace-desktop >/dev/null 2>&1; then
     echo "expected production scope guard to reject reset" >&2
     exit 1
 fi

@@ -444,9 +444,13 @@ fn persist_agent_keys_with(store: &impl KeyStore, records: &mut [ManagedAgentRec
 }
 
 /// One-time migration of agent keys from the production keyring service
-/// (`"buzz-desktop"`) to the dev service (`"buzz-desktop-dev"`). Only runs
-/// in debug builds — release builds never touch `"buzz-desktop"` from this
-/// path.
+/// (`"pimia-workspace-desktop"`) to the dev service
+/// (`"pimia-workspace-desktop-dev"`). Only runs in debug builds — release
+/// builds never touch the production service from this path.
+///
+/// Pimia divergence: both service names come from our own lineage. Upstream
+/// read `"buzz-desktop"` here, which on a machine that also runs Buzz is
+/// somebody else's Nostr identity.
 ///
 /// Idempotent: skips any key that already exists in the dev service so
 /// repeated boots after migration are no-ops. Leaves the production keyring
@@ -458,7 +462,7 @@ fn persist_agent_keys_with(store: &impl KeyStore, records: &mut [ManagedAgentRec
 /// after the service-name change.
 #[cfg(debug_assertions)]
 pub fn migrate_agent_keys_to_dev_service(app: &tauri::AppHandle) {
-    if !cfg!(feature = "system-keyring") || keyring_service() != "buzz-desktop-dev" {
+    if !cfg!(feature = "system-keyring") || keyring_service() != "pimia-workspace-desktop-dev" {
         return;
     }
 
@@ -481,7 +485,7 @@ pub fn migrate_agent_keys_to_dev_service(app: &tauri::AppHandle) {
     // A fresh non-singleton store for the prod service — its own empty
     // cache so reads go to the OS keyring without polluting the dev
     // singleton's cache.
-    let prod_store = crate::secret_store::SecretStore::keyring("buzz-desktop");
+    let prod_store = crate::secret_store::SecretStore::keyring("pimia-workspace-desktop");
     let dev_store = crate::secret_store::SecretStore::shared(keyring_service());
     copy_agent_keys_between_stores(&pubkeys, &prod_store, dev_store);
 }
