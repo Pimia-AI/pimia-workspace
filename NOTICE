@@ -1,0 +1,12 @@
+Pimia Workspace
+Copyright 2026 Pimia AI
+
+This product includes software developed at Block, Inc.
+(https://github.com/block/buzz), licensed under the Apache License,
+Version 2.0.
+
+Pimia Workspace is a hard fork of Buzz, taken at commit
+02f640bc4559c48ac0c2ec595ef34dd2c294b0db (2026-08-07, upstream version 0.5.7).
+It is not affiliated with, endorsed by, or supported by Block, Inc.
+
+See docs/UPSTREAM.md for the divergence log.
