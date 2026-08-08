@@ -613,6 +613,7 @@ pub fn run() {
             pimia::pimia_auth_status,
             pimia::pimia_connect_tenant,
             pimia::pimia_cancel_connect,
+            pimia::pimia_connect_phase,
             pimia::pimia_disconnect_tenant,
             pimia::pimia_set_active_tenant,
             pimia::pimia_api_request,

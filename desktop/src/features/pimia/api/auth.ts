@@ -58,6 +58,21 @@ export async function cancelPimiaConnect(): Promise<boolean> {
   return (await invoke("pimia_cancel_connect")) as boolean;
 }
 
+/**
+ * En qué punto está la autorización según el backend.
+ *
+ * La promesa de `connectPimiaTenant` no es fuente de verdad fiable: si el
+ * webview se recarga a media invocación —una recarga de Vite, un reinicio— el
+ * callback del comando se pierde y la promesa no se resuelve nunca. Preguntando
+ * la fase, la UI puede decir «esto ya no está en marcha» en vez de dejar un
+ * spinner eterno.
+ */
+export type PimiaConnectPhase = "idle" | "awaitingBrowser" | "exchanging";
+
+export async function fetchPimiaConnectPhase(): Promise<PimiaConnectPhase> {
+  return (await invoke("pimia_connect_phase")) as PimiaConnectPhase;
+}
+
 export async function disconnectPimiaTenant(
   tenantId: string,
 ): Promise<PimiaAuthStatus> {

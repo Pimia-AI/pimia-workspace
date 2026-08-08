@@ -10,7 +10,7 @@ use tauri_plugin_opener::OpenerExt as _;
 
 use crate::pimia::{
     api::{self, PimiaApiError, PimiaRequest},
-    login::{self, PimiaLoginState},
+    login::{self, LoginPhase, PimiaLoginState},
     oauth,
     vault::{self, TenantConnection},
 };
@@ -105,6 +105,16 @@ pub(crate) fn pimia_cancel_connect(login: tauri::State<'_, PimiaLoginState>) -> 
     login.cancel()
 }
 
+/// En qué punto está la autorización.
+///
+/// La UI no puede fiarse solo de su promesa de `invoke`: si el webview se
+/// recarga a media invocación, el callback se pierde y el spinner no termina
+/// nunca. Preguntando la fase puede decir «esto ya no está en marcha».
+#[tauri::command]
+pub(crate) fn pimia_connect_phase(login: tauri::State<'_, PimiaLoginState>) -> LoginPhase {
+    login.phase()
+}
+
 /// Desconecta un tenant: **revoca primero, borra después**.
 ///
 /// La revocación con el refresh token tumba el grant entero en el servidor. Si
@@ -193,16 +203,24 @@ pub(crate) async fn pimia_connect_tenant(
     )?;
 
     if let Err(error) = app.opener().open_url(authorize_url.as_str(), None::<&str>) {
-        login.finish(&oauth_state);
+        login.settle(&oauth_state);
         return Err(format!("no se pudo abrir el navegador: {error}"));
     }
 
+    // Desde aquí hay que dejar la fase en reposo **en toda salida**: si se queda
+    // en `exchanging` y el webview se recargó, la UI seguiría creyendo que la
+    // autorización sigue viva.
     let code = login::await_authorization_code(channels).await;
-    login.finish(&oauth_state);
     drop(loopback);
-    let code = code?;
+    let code = match code {
+        Ok(code) => code,
+        Err(error) => {
+            login.settle(&oauth_state);
+            return Err(error);
+        }
+    };
 
-    let tokens = oauth::exchange_code(
+    let tokens = match oauth::exchange_code(
         &client,
         &metadata,
         &client_id,
@@ -210,22 +228,46 @@ pub(crate) async fn pimia_connect_tenant(
         &code,
         &pkce.verifier,
     )
-    .await?;
+    .await
+    {
+        Ok(tokens) => tokens,
+        Err(error) => {
+            login.settle(&oauth_state);
+            return Err(error);
+        }
+    };
 
     // Se relee el vault en vez de reusar el de arriba: entre la apertura del
     // navegador y la vuelta del usuario pueden haber pasado minutos, y otra
     // ventana pudo tocar el llavero.
-    let mut store = vault::load_vault()?;
-    store.upsert(TenantConnection {
-        id: tenant_id.clone(),
-        base_url: base_url.clone(),
-        label: vault::tenant_label_for(&base_url),
-        client_id,
-        tokens,
-        connected_at: vault::now_ms(),
-    });
-    store.active_tenant_id = Some(tenant_id);
-    vault::save_vault(&store)?;
+    //
+    // Un fallo del llavero a partir de aquí es lo más caro del flujo: el grant
+    // ya existe en el tenant pero no se puede guardar. El mensaje tiene que
+    // decir qué hacer, porque la causa típica es un aviso del llavero denegado.
+    let persist = (|| -> Result<vault::PimiaVault, String> {
+        let mut store = vault::load_vault()?;
+        store.upsert(TenantConnection {
+            id: tenant_id.clone(),
+            base_url: base_url.clone(),
+            label: vault::tenant_label_for(&base_url),
+            client_id,
+            tokens,
+            connected_at: vault::now_ms(),
+        });
+        store.active_tenant_id = Some(tenant_id);
+        vault::save_vault(&store)?;
+        Ok(store)
+    })();
+
+    login.settle(&oauth_state);
+
+    let store = persist.map_err(|error| {
+        format!(
+            "se autorizó el acceso pero no se pudo guardar en el llavero \
+             ({error}). Si el sistema pidió permiso, hay que concederlo \
+             («Permitir siempre») y volver a conectar."
+        )
+    })?;
 
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_focus();

@@ -5,11 +5,23 @@
  * embebido: el usuario ve la barra de direcciones del tenant y su gestor de
  * contraseñas funciona. Mientras está fuera, este diálogo se queda esperando —
  * puede tardar minutos, así que hay un botón de cancelar de verdad.
+ *
+ * ⚠️ Y por eso el diálogo **no se fía solo de su promesa**. Si el webview se
+ * recarga a media invocación —una recarga de Vite en desarrollo, un reinicio de
+ * la app— el callback del comando se pierde (Tauri avisa con «Couldn't find
+ * callback id …»), la promesa no se resuelve nunca y el spinner se queda para
+ * siempre. Fue exactamente cómo se colgó el primer login real. Así que mientras
+ * espera se le pregunta al backend en qué fase está, y si dice que ya no hay
+ * nada en marcha se cuenta y se ofrece reintentar.
  */
 
 import * as React from "react";
 import { ExternalLink } from "lucide-react";
 
+import {
+  fetchPimiaConnectPhase,
+  type PimiaConnectPhase,
+} from "@/features/pimia/api/auth";
 import { PimiaApiError } from "@/features/pimia/api/pimiaClient";
 import {
   useCancelPimiaConnect,
@@ -27,6 +39,17 @@ import {
 import { Input } from "@/shared/ui/input";
 import { Spinner } from "@/shared/ui/spinner";
 
+/** Cada cuánto se comprueba que la autorización sigue viva. */
+const PHASE_POLL_MS = 2_000;
+
+const PHASE_LABEL: Record<Exclude<PimiaConnectPhase, "idle">, string> = {
+  awaitingBrowser: "Esperando a que autorices en el navegador…",
+  exchanging: "Autorizado. Guardando el acceso…",
+};
+
+const ORPHANED_MESSAGE =
+  "La autorización se interrumpió (la ventana se recargó por medio). Vuelve a intentarlo.";
+
 type PimiaConnectDialogProps = {
   onOpenChange: (open: boolean) => void;
   open: boolean;
@@ -38,9 +61,43 @@ export function PimiaConnectDialog({
 }: PimiaConnectDialogProps) {
   const [baseUrl, setBaseUrl] = React.useState("");
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
+  const [phase, setPhase] = React.useState<PimiaConnectPhase>("idle");
   const connect = useConnectPimiaTenant();
   const cancel = useCancelPimiaConnect();
-  const isConnecting = connect.isPending;
+  // Se muestra en marcha solo si el backend lo confirma: una promesa huérfana
+  // deja `connect.isPending` en `true` para siempre.
+  const isConnecting = connect.isPending && phase !== "idle";
+
+  // Mientras el diálogo cree que hay una autorización en vuelo, se le pregunta
+  // al backend. En cuanto dice `idle` sin que la promesa haya resuelto, es que
+  // el callback se quedó huérfano.
+  React.useEffect(() => {
+    if (!open || !connect.isPending) {
+      return;
+    }
+
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const next = await fetchPimiaConnectPhase();
+        if (cancelled) return;
+        setPhase(next);
+        if (next === "idle") {
+          setErrorMessage(ORPHANED_MESSAGE);
+        }
+      } catch {
+        // Si ni siquiera se puede preguntar, no se inventa nada: se deja como
+        // está y el siguiente sondeo lo reintenta.
+      }
+    };
+
+    void check();
+    const timer = setInterval(() => void check(), PHASE_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [connect.isPending, open]);
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen && isConnecting) {
@@ -48,6 +105,7 @@ export function PimiaConnectDialog({
     }
     if (!nextOpen) {
       setErrorMessage(null);
+      setPhase("idle");
     }
     onOpenChange(nextOpen);
   };
@@ -55,6 +113,7 @@ export function PimiaConnectDialog({
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setErrorMessage(null);
+    setPhase("awaitingBrowser");
     try {
       await connect.mutateAsync(baseUrl);
       setBaseUrl("");
@@ -71,8 +130,12 @@ export function PimiaConnectDialog({
         return;
       }
       setErrorMessage(message);
+    } finally {
+      setPhase("idle");
     }
   };
+
+  const canSubmit = !isConnecting && baseUrl.trim() !== "";
 
   return (
     <Dialog onOpenChange={handleOpenChange} open={open}>
@@ -115,9 +178,12 @@ export function PimiaConnectDialog({
               </p>
             ) : null}
             {isConnecting ? (
-              <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <p
+                className="flex items-center gap-2 text-sm text-muted-foreground"
+                data-testid="pimia-connect-phase"
+              >
                 <Spinner className="h-3.5 w-3.5" />
-                Esperando a que autorices en el navegador…
+                {PHASE_LABEL[phase]}
               </p>
             ) : null}
           </div>
@@ -130,10 +196,7 @@ export function PimiaConnectDialog({
             >
               Cancelar
             </Button>
-            <Button
-              disabled={isConnecting || baseUrl.trim() === ""}
-              type="submit"
-            >
+            <Button disabled={!canSubmit} type="submit">
               <ExternalLink className="h-4 w-4" />
               Autorizar en el navegador
             </Button>

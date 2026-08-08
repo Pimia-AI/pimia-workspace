@@ -46,7 +46,20 @@ export default defineConfig(async () => ({
       : undefined,
     watch: {
       // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      //
+      // Divergencia Pimia: y la salida de los e2e. Playwright reescribe
+      // `playwright-report/` y `test-results/` en cada pasada, Vite lo veía como
+      // un cambio del proyecto y **recargaba la página entera de la app de
+      // escritorio**. Una recarga a media invocación deja huérfano el callback
+      // del comando Tauri en vuelo («Couldn't find callback id …») y la UI se
+      // queda esperando para siempre — así se colgó el primer login de Pimia
+      // real, con la suite corriendo en paralelo.
+      ignored: [
+        "**/src-tauri/**",
+        "**/playwright-report/**",
+        "**/test-results/**",
+        "**/dist/**",
+      ],
     },
   },
 }));

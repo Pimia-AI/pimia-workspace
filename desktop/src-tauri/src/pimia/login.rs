@@ -80,6 +80,26 @@ pub(crate) fn loopback_redirect_uri(port: u16) -> String {
 
 pub(crate) const CANCELLED: &str = "autorización cancelada";
 
+/// En qué punto está la autorización, para que el frontend pueda distinguir
+/// «sigue en marcha» de «se quedó huérfana».
+///
+/// Hace falta porque la promesa de `invoke` no es fuente de verdad fiable: si el
+/// webview se recarga a media invocación (una recarga de Vite, un reinicio), el
+/// callback del comando se pierde —Tauri avisa con «Couldn't find callback id»—
+/// y la UI se queda con un spinner que no termina nunca. Preguntando la fase se
+/// puede decir «esto ya no está en marcha, vuelve a intentarlo».
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum LoginPhase {
+    /// No hay nada en marcha.
+    #[default]
+    Idle,
+    /// Se abrió el navegador y se espera al usuario.
+    AwaitingBrowser,
+    /// Volvió el código y se está canjeando por tokens.
+    Exchanging,
+}
+
 struct PendingLogin {
     oauth_state: String,
     sender: oneshot::Sender<Result<String, String>>,
@@ -88,7 +108,10 @@ struct PendingLogin {
 /// La autorización en vuelo, si la hay. Solo puede haber una: empezar otra
 /// cancela la anterior, que es lo que espera quien pulsa «Conectar» dos veces.
 #[derive(Default)]
-pub(crate) struct PimiaLoginState(Mutex<Option<PendingLogin>>);
+pub(crate) struct PimiaLoginState {
+    pending: Mutex<Option<PendingLogin>>,
+    phase: Mutex<LoginPhase>,
+}
 
 /// El único extremo del que cuelga el flujo.
 ///
@@ -101,10 +124,21 @@ pub(crate) struct PimiaLoginState(Mutex<Option<PendingLogin>>);
 pub(crate) struct LoginChannel(oneshot::Receiver<Result<String, String>>);
 
 impl PimiaLoginState {
+    pub(crate) fn phase(&self) -> LoginPhase {
+        *self.phase.lock().unwrap_or_else(|error| error.into_inner())
+    }
+
+    fn set_phase(&self, phase: LoginPhase) {
+        *self.phase.lock().unwrap_or_else(|error| error.into_inner()) = phase;
+    }
+
     pub(crate) fn begin(&self, oauth_state: &str) -> LoginChannel {
         let (sender, receiver) = oneshot::channel();
 
-        let mut pending = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        let mut pending = self
+            .pending
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         if let Some(previous) = pending.take() {
             let _ = previous
                 .sender
@@ -114,6 +148,8 @@ impl PimiaLoginState {
             oauth_state: oauth_state.to_string(),
             sender,
         });
+        drop(pending);
+        self.set_phase(LoginPhase::AwaitingBrowser);
 
         LoginChannel(receiver)
     }
@@ -122,7 +158,10 @@ impl PimiaLoginState {
     /// esperando o cuando el `state` no casa — y en ese caso no se toca nada:
     /// un callback ajeno no puede interrumpir una autorización en curso.
     pub(crate) fn deliver(&self, oauth_state: &str, result: Result<String, String>) -> bool {
-        let mut pending = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        let mut pending = self
+            .pending
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         if pending
             .as_ref()
             .is_none_or(|login| login.oauth_state != oauth_state)
@@ -132,7 +171,15 @@ impl PimiaLoginState {
 
         match pending.take() {
             Some(login) => {
+                let delivered_code = result.is_ok();
                 let _ = login.sender.send(result);
+                drop(pending);
+                if delivered_code {
+                    // El código ya volvió; lo que queda es el canje.
+                    self.set_phase(LoginPhase::Exchanging);
+                } else {
+                    self.set_phase(LoginPhase::Idle);
+                }
                 true
             }
             None => false,
@@ -140,27 +187,39 @@ impl PimiaLoginState {
     }
 
     pub(crate) fn cancel(&self) -> bool {
-        let mut pending = self.0.lock().unwrap_or_else(|error| error.into_inner());
-        match pending.take() {
+        let mut pending = self
+            .pending
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let cancelled = match pending.take() {
             Some(login) => {
                 let _ = login.sender.send(Err(CANCELLED.to_string()));
                 true
             }
             None => false,
-        }
+        };
+        drop(pending);
+        self.set_phase(LoginPhase::Idle);
+        cancelled
     }
 
-    /// Descarta la autorización en vuelo sin avisar a nadie. Se llama al salir
-    /// del flujo (con éxito o con error) para no dejar vivo un `state` que un
-    /// callback tardío pudiera reactivar.
-    pub(crate) fn finish(&self, oauth_state: &str) {
-        let mut pending = self.0.lock().unwrap_or_else(|error| error.into_inner());
+    /// Cierra el flujo: descarta la autorización en vuelo sin avisar a nadie y
+    /// deja la fase en reposo. Se llama al salir (con éxito o con error) para no
+    /// dejar vivo un `state` que un callback tardío pudiera reactivar, ni una
+    /// fase que haga creer al frontend que sigue pasando algo.
+    pub(crate) fn settle(&self, oauth_state: &str) {
+        let mut pending = self
+            .pending
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         if pending
             .as_ref()
             .is_some_and(|login| login.oauth_state == oauth_state)
         {
             *pending = None;
         }
+        drop(pending);
+        self.set_phase(LoginPhase::Idle);
     }
 }
 
@@ -320,18 +379,60 @@ mod tests {
         );
     }
 
+    /// La fase es lo que salva a la UI de un spinner eterno cuando el webview se
+    /// recarga a media autorización: tiene que contar la verdad en cada paso, y
+    /// volver a reposo por todos los caminos de salida.
     #[tokio::test]
-    async fn finish_drops_the_pending_login() {
+    async fn the_phase_tracks_the_flow_and_always_returns_to_idle() {
+        let login = PimiaLoginState::default();
+        assert_eq!(login.phase(), LoginPhase::Idle);
+
+        let channels = login.begin("estado");
+        assert_eq!(login.phase(), LoginPhase::AwaitingBrowser);
+
+        // Con el código en la mano, lo que queda es el canje.
+        login.deliver("estado", Ok("codigo".to_string()));
+        assert_eq!(login.phase(), LoginPhase::Exchanging);
+        assert_eq!(
+            await_authorization_code(channels).await,
+            Ok("codigo".to_string())
+        );
+
+        // Y quien cierra el flujo la devuelve a reposo.
+        login.settle("estado");
+        assert_eq!(login.phase(), LoginPhase::Idle);
+    }
+
+    #[tokio::test]
+    async fn a_failed_callback_or_a_cancel_leave_the_phase_idle() {
+        let login = PimiaLoginState::default();
+
+        let _channels = login.begin("estado");
+        login.deliver("estado", Err("acceso denegado".to_string()));
+        assert_eq!(
+            login.phase(),
+            LoginPhase::Idle,
+            "un callback con error no deja el flujo en canje"
+        );
+
+        let _channels = login.begin("otro");
+        assert_eq!(login.phase(), LoginPhase::AwaitingBrowser);
+        login.cancel();
+        assert_eq!(login.phase(), LoginPhase::Idle);
+    }
+
+    #[tokio::test]
+    async fn settle_drops_the_pending_login() {
         let login = PimiaLoginState::default();
         let _channels = login.begin("estado");
-        login.finish("otro");
+        login.settle("otro");
         assert!(
             login.deliver("estado", Ok("codigo".to_string())),
             "finish con otro state no debe tocar la autorización viva"
         );
 
         let _channels = login.begin("estado");
-        login.finish("estado");
+        login.settle("estado");
         assert!(!login.deliver("estado", Ok("codigo".to_string())));
     }
 }

@@ -352,3 +352,39 @@ reescribe como «se ancla al borde derecho y despeja el chrome», conservando lo
 que sigue valiendo (alineación vertical con la superficie de la app, simetría de
 los insets del rail) y añadiendo lo nuevo (el rail va por fuera de la barra de
 Buzz, y el chrome vuelve a despejar los semáforos enteros).
+
+### 2026-08-08 — Un login que no se puede quedar colgado (Fase 1)
+
+**Cómo se descubrió.** El primer login OAuth real se quedó con el spinner
+puesto para siempre, aunque el navegador ya había vuelto con el código. En el log
+de `tauri dev` estaba la causa:
+
+```
+[TAURI] Couldn't find callback id 2623219052. This might happen when the app is
+reloaded while Rust is running an asynchronous operation.
+```
+
+Y encima, 31 líneas de `page reload playwright-report/index.html`.
+
+**Dos fallos, uno de entorno y otro de diseño.**
+
+1. **Vite vigilaba la salida de los e2e.** `server.watch.ignored` solo excluía
+   `src-tauri`, así que cada pasada de Playwright reescribía
+   `playwright-report/` y Vite **recargaba la página entera** de la app de
+   escritorio. Una recarga a media invocación deja huérfano el callback del
+   comando Tauri en vuelo. Ahora se ignoran también `playwright-report/`,
+   `test-results/` y `dist/`.
+2. **El diálogo se fiaba solo de su promesa**, y eso es frágil aunque nadie
+   corra tests: basta una recarga del webview o un reinicio a media
+   autorización. `PimiaLoginState` lleva ahora una **fase**
+   (`idle`/`awaitingBrowser`/`exchanging`) que el frontend consulta con
+   `pimia_connect_phase` mientras espera. Si el backend dice `idle` y la promesa
+   no ha resuelto, la autorización se quedó huérfana: se dice y se ofrece
+   reintentar, en vez de girar para siempre. De propina, la UI ahora distingue
+   «esperando en el navegador» de «guardando el acceso».
+
+**Y un tercer arreglo que salió del mismo log**: había decenas de
+`keyring write … failed (User canceled the operation)`. Si el aviso del llavero
+se deniega justo después de canjear el código, el grant existe en el tenant pero
+no se puede guardar — el peor momento posible. Ese error ya no sube crudo: dice
+qué pasó y qué hacer («Permitir siempre» y volver a conectar).
