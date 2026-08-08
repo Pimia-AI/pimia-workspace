@@ -88,6 +88,21 @@ fn queue_community_deep_link(
         });
 }
 
+/// Cablea la recepción de enlaces profundos: los que llegan con la app viva
+/// (macOS) y los del arranque en frío. Los duplicados de Windows/Linux los
+/// reenvía el plugin de instancia única.
+#[cfg(desktop)]
+pub(crate) fn install(app: &tauri::AppHandle) {
+    use tauri_plugin_deep_link::DeepLinkExt as _;
+
+    let handle = app.clone();
+    app.deep_link().on_open_url(move |event| {
+        for url in event.urls() {
+            handle_deep_link_url(&handle, url.as_str());
+        }
+    });
+}
+
 fn activate_main_window(app: &tauri::AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
         return;
@@ -304,7 +319,11 @@ pub(crate) fn handle_deep_link_url(app: &tauri::AppHandle, url_str: &str) {
         }
     };
 
-    if url.scheme() != "buzz" {
+    // Divergencia Pimia: el esquema que el fork registra ante el SO es
+    // `pimia-workspace://` (Fase 0, para no competir con el Buzz del usuario por
+    // los enlaces del sistema). `buzz://` se sigue aceptando porque los enlaces
+    // internos que la app genera y parsea lo usan.
+    if !matches!(url.scheme(), "pimia-workspace" | "buzz") {
         eprintln!("buzz-desktop: ignoring unsupported deep link scheme: {url_str}");
         return;
     }
@@ -365,6 +384,15 @@ pub(crate) fn handle_deep_link_url(app: &tauri::AppHandle, url_str: &str) {
             };
             activate_main_window(app);
             let _ = app.emit("deep-link-message", payload);
+        }
+        Some("oauth") => {
+            // `pimia-workspace://oauth/callback?code=…&state=…` — el retorno de
+            // la autorización de Pimia. El `state` se valida en `pimia::login`:
+            // un callback que no case con la autorización en vuelo se descarta.
+            activate_main_window(app);
+            if !crate::pimia::deliver_oauth_deep_link(app, &url) {
+                eprintln!("buzz-desktop: ignoring OAuth callback with no matching pending login");
+            }
         }
         Some("nostr-bind") => match parse_nostr_bind_deep_link(&url) {
             Ok(payload) => {

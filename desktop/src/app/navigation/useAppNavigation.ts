@@ -79,6 +79,37 @@ export function useAppNavigation() {
     [commitNavigation],
   );
 
+  /**
+   * Navega a una ruta del ERP por su path. La nav de Pimia es una tabla de
+   * módulos (ver `features/pimia/ui/PimiaSidebar.tsx`), no un `goX()` por
+   * destino: es el mismo registro que la Fase 3 necesita para que un vertical
+   * sea «configuración + módulos».
+   */
+  const goPimiaPath = React.useCallback(
+    (path: string, behavior?: NavigationBehavior) =>
+      commitNavigation(
+        {
+          to: path,
+        },
+        behavior,
+      ),
+    [commitNavigation],
+  );
+
+  const goPimiaCustomer = React.useCallback(
+    (customerId: string, behavior?: NavigationBehavior) =>
+      commitNavigation(
+        {
+          to: "/pimia/clientes/$customerId",
+          params: {
+            customerId,
+          },
+        },
+        behavior,
+      ),
+    [commitNavigation],
+  );
+
   const goPulse = React.useCallback(
     (behavior?: NavigationBehavior) =>
       commitNavigation(
@@ -331,6 +362,8 @@ export function useAppNavigation() {
     goHome,
     goNewMessage,
     goPimia,
+    goPimiaCustomer,
+    goPimiaPath,
     goProject,
     goProjects,
     goPulse,
