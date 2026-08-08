@@ -497,3 +497,30 @@ documentado con `${BUZZ_INSTANCE_SLUG:-main}`—, que tiene identidad pero **no*
 `pimia.tenants`. O sea: la identidad Nostr se conserva y no hay que rehacer el
 onboarding de Buzz, pero **hay que reconectar Pimia una vez**. A cambio, la
 conexión deja de evaporarse en cada cambio de rama, que era el problema.
+
+### 2026-08-08 — El pase de diseño del ERP (patrones de la referencia)
+
+Trabajo casi todo dentro de `desktop/src/features/pimia/`, que es nuestro y no
+existe upstream. Lo que **sí** toca terreno compartido, y por qué:
+
+- **`desktop/src/shared/ui/table.tsx` — fichero NUEVO.** Faltaba el primitivo
+  `table` y las listas densas de la referencia no se pueden hacer sin él.
+  Entró por la vía estándar (`pnpm dlx shadcn@latest add table`): un fichero,
+  MIT, tematizado por las variables que ya hay, **cero dependencias nuevas**
+  (el bloque `table` de shadcn es HTML puro, sin Radix). No hay conflicto
+  posible con upstream mientras upstream no añada uno propio; si lo añade,
+  gana el suyo y nuestras tablas se recompilan contra él.
+- **`desktop/playwright.config.ts`** — una línea más en el `testMatch` del
+  proyecto `smoke` para el spec de capturas del ERP. Misma clase de
+  divergencia que la que ya metió `dual-sidebars.spec.ts`; se resuelve sola en
+  cualquier merge razonable.
+
+Y una decisión que evita una divergencia mayor: la insignia de estado
+**no modifica `shared/ui/badge.tsx`**. La variante `destructive` de Buzz es
+sólida —pensada para un botón de borrar— y al lado de las demás gritaba en una
+tabla; en vez de tocar el primitivo, `PimiaStatusBadge` la atenúa con la misma
+variable (`bg-destructive/15 text-destructive`). Un fichero menos que
+reconciliar cada vez que upstream toque su sistema de insignias.
+
+El lenguaje visual y los componentes compuestos están documentados en
+[`docs/PIMIA-UI.md`](PIMIA-UI.md).
