@@ -294,3 +294,27 @@ alguien necesita «solo un dato» del relay.
 `CLAUDE.md` explica por qué se coló: el hook de pre-commit que corre
 `just desktop-tauri-fmt` falla en worktrees. Aplicada; `cargo fmt --check` del
 crate Tauri queda en verde.
+
+### Pendiente conocido de la Fase 1: el coste horizontal de la segunda barra
+
+Con dos barras permanentes el contenido paga **548 px de cromo** (248 + 300)
+donde antes pagaba 300. En una ventana de 1280 eso deja 732 px, y varias
+superficies de upstream cruzan ahí sus propios umbrales responsive.
+
+Mitigado: por debajo de `PIMIA_SIDEBAR_COMPACT_BREAKPOINT_PX` (1100) la barra
+del ERP se pliega sola a iconos y devuelve 200 px. El usuario puede volver a
+abrirla a mano.
+
+Lo que queda anotado, por si molesta en uso real:
+
+- **Projects, en ventana estrecha**: con menos de ~800 px de contenido, la
+  columna de resumen de la lista de proyectos y la de repositorios se desalinean
+  36 px. Es comportamiento responsive de upstream, no del shell; el spec
+  `project-commit-detail.spec.ts` mide alineación de columnas y se le da una
+  ventana donde esa comparación significa algo.
+- **El rail de comunidades sigue a la izquierda.** Es el conmutador de
+  comunidades de **Buzz**, y con la barra de Buzz a la derecha queda encajado
+  contra la del ERP. Lo coherente sería moverlo a la derecha, por fuera de la
+  barra de Buzz — y con él el `RelayConnectionOverlay`, que aparece abajo a la
+  izquierda cuando la barra de Buzz está plegada. **Decisión de disposición del
+  fundador**: no se toca sin su visto bueno.
