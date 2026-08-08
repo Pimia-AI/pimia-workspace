@@ -472,20 +472,10 @@ export async function installPimiaMock(
               notes:
                 "Precios válidos salvo variación del coste de materiales. No incluye licencias ni tasas municipales.",
               customer: owner ?? found.customer,
-              taxes: [
-                {
-                  id: `${found.id}-iva`,
-                  name: "IVA",
-                  percent: 21,
-                  amount: vat,
-                },
-                {
-                  id: `${found.id}-irpf`,
-                  name: "IRPF",
-                  percent: -15,
-                  amount: withholding,
-                },
-              ],
+              // Como el tenant real: **sin** impuestos de cabecera (van por
+              // línea) y con el tipo YA dentro del nombre. Las dos cosas
+              // rompieron la ficha en producción mientras el mock, que las
+              // ponía «bien», la daba por buena.
               items: (LINES[found.id] ?? []).map((line, index) => ({
                 ...line,
                 id: `${found.id}-${index + 1}`,
@@ -493,13 +483,13 @@ export async function installPimiaMock(
                 taxes: [
                   {
                     id: `${found.id}-${index + 1}-iva`,
-                    name: "IVA",
+                    name: "IVA 21%",
                     percent: 21,
                     amount: Math.round(line.total * 0.21),
                   },
                   {
                     id: `${found.id}-${index + 1}-irpf`,
-                    name: "IRPF",
+                    name: "IRPF -15%",
                     percent: -15,
                     amount: -Math.round(line.total * 0.15),
                   },

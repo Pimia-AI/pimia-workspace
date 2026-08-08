@@ -12,12 +12,17 @@
  * para discrepar de la factura de verdad.
  */
 
+import * as React from "react";
 import type { ReactNode } from "react";
 import { ArrowLeft, User } from "lucide-react";
 
 import { useAppNavigation } from "@/app/navigation/useAppNavigation";
-import type { PimiaEstimateLine } from "@/features/pimia/api/estimates";
+import type {
+  PimiaEstimateLine,
+  PimiaEstimateTax,
+} from "@/features/pimia/api/estimates";
 import { formatCents } from "@/features/pimia/lib/money";
+import { resolveDocumentTaxes, taxLabel } from "@/features/pimia/lib/taxes";
 import { useActivePimiaTenant } from "@/features/pimia/hooks/usePimiaAuth";
 import { usePimiaEstimateQuery } from "@/features/pimia/hooks/usePimiaResources";
 import {
@@ -103,13 +108,30 @@ function FieldCard({
   );
 }
 
-/** «IVA 21%» o, si el impuesto es de importe fijo, solo su nombre. */
-function taxLabel(tax: { name: string; percent: number | null }) {
-  return tax.percent === null
-    ? tax.name
-    : `${tax.name} ${tax.percent.toLocaleString("es-ES", {
-        maximumFractionDigits: 2,
-      })}%`;
+/**
+ * Los impuestos de una celda: el nombre a la izquierda y el importe a la
+ * derecha, en columna. Puestos en una sola cadena («IVA 21% 525,00 €») el ojo
+ * no encuentra dónde empieza el dinero, que es justo lo que hay que poder
+ * comparar entre líneas.
+ */
+function TaxLines({ taxes }: { taxes: PimiaEstimateTax[] | null }) {
+  if (!taxes || taxes.length === 0) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  return (
+    <span className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+      {taxes.map((tax) => (
+        <React.Fragment key={tax.id}>
+          <span className="whitespace-nowrap text-muted-foreground">
+            {taxLabel(tax)}
+          </span>
+          <span className="whitespace-nowrap text-right tabular-nums text-foreground">
+            {formatCents(tax.amountCents ?? 0)}
+          </span>
+        </React.Fragment>
+      ))}
+    </span>
+  );
 }
 
 /** El desglose. Cada línea solo aparece si el servidor la manda con valor. */
@@ -162,6 +184,10 @@ export function PimiaEstimateScreen({ estimateId }: { estimateId: string }) {
 
   const estimate = query.data;
   const lines = estimate?.lines ?? [];
+  const documentTaxes = resolveDocumentTaxes(
+    estimate?.taxes ?? null,
+    estimate?.lines ?? null,
+  );
 
   return (
     <div className="flex h-full flex-col gap-5 overflow-y-auto p-6">
@@ -273,18 +299,8 @@ export function PimiaEstimateScreen({ estimateId }: { estimateId: string }) {
                           className="py-2.5 font-normal text-muted-foreground"
                           dimZero={false}
                         />
-                        <TableCell className="py-2.5 text-xs text-muted-foreground">
-                          {line.taxes && line.taxes.length > 0
-                            ? line.taxes.map((tax) => (
-                                <span
-                                  className="block whitespace-nowrap tabular-nums"
-                                  key={tax.id}
-                                >
-                                  {taxLabel(tax)}{" "}
-                                  {formatCents(tax.amountCents ?? 0)}
-                                </span>
-                              ))
-                            : "—"}
+                        <TableCell className="py-2.5">
+                          <TaxLines taxes={line.taxes} />
                         </TableCell>
                         <PimiaAmountCell
                           cents={line.totalCents}
@@ -313,10 +329,11 @@ export function PimiaEstimateScreen({ estimateId }: { estimateId: string }) {
                   label="Descuento"
                 />
               ) : null}
-              {/* Uno por uno cuando el servidor los desglosa: el IVA y la
-                  retención de IRPF sumados dan un neto que esconde las dos. */}
-              {estimate.taxes && estimate.taxes.length > 0 ? (
-                estimate.taxes.map((tax) => (
+              {/* Uno por uno: el IVA y la retención de IRPF sumados dan un
+                  neto que esconde las dos. Si el documento los lleva por
+                  línea, se agregan de ahí — igual que hace el panel. */}
+              {documentTaxes.length > 0 ? (
+                documentTaxes.map((tax) => (
                   <TotalsRow
                     amountCents={tax.amountCents ?? 0}
                     key={tax.id}

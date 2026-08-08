@@ -58,9 +58,19 @@ molde que la factura hereda:
 ⛔ **Los impuestos van uno a uno, nunca sumados.** Un presupuesto español lleva
 a la vez IVA y **retención de IRPF**, que es negativa: el campo `tax` de la API
 es el neto, así que enseñarlo tal cual («Impuestos 150,00 €») esconde los 525
-de IVA y los −375 de retención. Se leen de la colección `taxes` —que trae
-`name`, `percent` y `amount`, y viene tanto en la cabecera como en cada
-línea— y solo se cae al neto si el servidor no la manda.
+de IVA y los −375 de retención. Todo eso vive resuelto y probado en
+`lib/taxes.ts`, con las dos trampas que solo aparecen con datos reales:
+
+- **El `name` ya trae el tipo dentro** (`"IVA 21%"`, no `"IVA"`), así que
+  añadirle el `percent` escribe «IVA 21% 21%».
+- **Los impuestos pueden vivir en las líneas y no en la cabecera.** Con
+  `tax_per_item`, la colección `taxes` del documento viene vacía y el desglose
+  se **agrega de las líneas** — que es lo que hace el panel. Sin eso se cae al
+  neto y la retención desaparece.
+
+Y en la tabla, el nombre y el importe del impuesto van en **columnas
+separadas**: en una sola cadena («IVA 21% 525,00 €») el ojo no encuentra dónde
+empieza el dinero, que es justo lo que hay que comparar entre líneas.
 
 **La vara es el panel de Pimia**, no la referencia: la misma pantalla en el
 workspace tiene que enseñar **como mínimo** lo que ya enseña el panel del mismo
