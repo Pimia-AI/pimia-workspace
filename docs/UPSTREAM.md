@@ -414,3 +414,86 @@ y dice el remedio (`brew install bash`).
 
 Consecuencia práctica: **en este Mac las capturas de PR no se pueden publicar**
 hasta instalar un bash moderno.
+
+### 2026-08-08 — El login real, cerrado (Fase 1)
+
+El único punto abierto de la definición de hecho de la Fase 1 queda verificado
+contra un tenant vivo. No hubo que tocar código: los tres arreglos del mismo día
+—el `watch.ignored` de Vite, la fase del diálogo y el llavero fuera del hilo
+principal— eran lo que faltaba.
+
+**Lo que se ejercitó**, contra `reformas-vera.taskai.work`:
+
+| | |
+|---|---|
+| Registro dinámico de client (RFC 7591) | `mcp_68ee25ee-17cc-4a77-bd61-94e36de2e5c9`, sin secreto |
+| Retorno | loopback `http://127.0.0.1:53682/oauth/callback`, PKCE S256 |
+| Scopes concedidos | `customers:read estimates:read estimates:write items:read` |
+| `TokenSet` | access + **refresh**, caducidad a 24 h |
+| Corte vertical | Clientes → detalle → **PRE-000133 creado** (borrador, 100,00 €) |
+
+**La prueba que cierra la definición de hecho es el reinicio**, y conviene decir
+cómo se comprueba sin fiarse de la UI: matar el proceso, relanzarlo y mirar el
+`mdat` de la entrada del llavero. Si el vault se **lee** y no se reescribe, el
+`mdat` **no cambia** — y no cambió. El pie de la barra vuelve a mostrar el host
+y la lista trae los presupuestos del tenant. Cero `keyring … User canceled` y
+cero `Couldn't find callback id` en los tres arranques de la sesión.
+
+```bash
+security find-generic-password -s "$BUZZ_DEV_KEYRING_SERVICE" | grep '"mdat"'
+```
+
+**Por qué los tres intentos anteriores no dejaron nada, y no era el OAuth**: sus
+servicios de llavero (`…-dev.main`, `…-dev.claude-hungry-hypatia-3e6b8e`) no
+tienen siquiera la clave `pimia.tenants`, y el servicio base la tiene vacía
+(`{"tenants": []}`). Nunca llegó a persistirse una conexión. La causa está en la
+entrada siguiente.
+
+### 2026-08-08 — `scripts/instance-env.sh` toma el checkout principal por un worktree
+
+**El síntoma que lo delató**: arrancando desde `/Volumes/data512/pimia-workspace`
+—el checkout principal, no un worktree— la app se presenta como «Pimia Workspace
+Dev (fase1-cierre-login)», con icono etiquetado y un servicio de llavero
+`pimia-workspace-desktop-dev.claude-fase1-cierre-login`.
+
+La detección compara `--git-dir` con `--git-common-dir` y su propio comentario
+dice «in the main working tree these are identical». **No lo son si el CWD es un
+subdirectorio**, que es exactamente como se usa el script (se hace `cd desktop`
+antes de sourcearlo). Git devuelve entonces uno absoluto y el otro relativo:
+
+```
+desde pimia-workspace/           .git                        .git             ← iguales
+desde pimia-workspace/desktop/   /Volumes/…/.git             ../.git          ← distintos
+```
+
+Consecuencia: **cada rama del checkout principal estrena servicio de llavero**, o
+sea identidad Nostr nueva y vault de Pimia vacío. Eso explica los tres servicios
+huérfanos que dejó la sesión anterior, y explica por qué el login «no se
+conservaba» entre intentos: no es que no se guardara, es que el intento
+siguiente miraba en otro cajón.
+
+El arreglo es pedirle a git las dos rutas en el mismo formato — correcto desde
+cualquier directorio:
+
+```bash
+GIT_DIR=$(git rev-parse --path-format=absolute --git-dir 2>/dev/null)
+GIT_COMMON_DIR=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+```
+
+`--path-format` pide git 2.31+. Si no está, las dos variables salen vacías, el
+bloque de worktree no entra y **dos instancias en paralelo colisionarían** en el
+directorio de datos y en `tauri-plugin-single-instance`; por eso el caso avisa
+por `stderr` en vez de degradar en silencio.
+
+**Comprobado en los dos lados** —lo que fallaba era justo que solo se había
+mirado uno—: desde `pimia-workspace/desktop` no etiqueta nada
+(`es.pimia.workspace.dev`, «Pimia Workspace Dev»), y desde
+`.claude/worktrees/<x>/desktop` sigue etiquetando
+(`es.pimia.workspace.dev.claude-<x>`, «Pimia Workspace Dev (<x>)»).
+
+**El peaje, pagado una vez.** Con el arreglo, el checkout principal vuelve al
+servicio `pimia-workspace-desktop-dev.main` —el que fija el comando de arranque
+documentado con `${BUZZ_INSTANCE_SLUG:-main}`—, que tiene identidad pero **no**
+`pimia.tenants`. O sea: la identidad Nostr se conserva y no hay que rehacer el
+onboarding de Buzz, pero **hay que reconectar Pimia una vez**. A cambio, la
+conexión deja de evaporarse en cada cambio de rama, que era el problema.
