@@ -223,6 +223,15 @@ test("collapsed sidebar still shows the reconnect card", async ({ page }) => {
   await expect(card).toBeVisible();
   await expect(card).toContainText("Can't reach the relay");
 
+  // Divergencia Pimia (👤): el aviso sale por el lado de la barra que lo
+  // contiene, y la de Buzz está a la derecha. A la izquierda saltaba de un
+  // extremo de la pantalla al otro al plegarla.
+  const cardBox = await card.boundingBox();
+  const viewport = page.viewportSize();
+  expect(cardBox).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(cardBox?.x ?? 0).toBeGreaterThan((viewport?.width ?? 0) / 2);
+
   await setChannelsReadError(page, null);
   await page.getByTestId("sidebar-reconnect").click();
   // Drive connected so the card shows success and auto-dismisses.

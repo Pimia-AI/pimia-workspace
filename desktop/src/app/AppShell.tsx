@@ -934,6 +934,7 @@ export function AppShell() {
                       <RelayConnectionOverlay
                         card={relayConnectionCard}
                         errorMessage={channelsErrorMessage}
+                        hasCommunityRail={hasCommunityRail}
                         isHuddleDrawerOpen={isHuddleDrawerOpen}
                       />
                     ) : null}

@@ -320,7 +320,7 @@ en una ventana de 820 px la hoja de gestión de canal se queda con el área de
 contenido entera, y el umbral era `> 500`. Ahí el cromo son 348 px (la barra del
 ERP ya plegada) en vez de 300, así que el máximo posible es 472: pasa a `> 450`.
 
-### 2026-08-08 — El rail de comunidades se va a la derecha (👤 fundador)
+### 2026-08-08 — El rail y el aviso de relay se van a la derecha (👤 fundador)
 
 **Por qué.** Es el conmutador de comunidades de **Buzz**. Con la barra de Buzz a
 la derecha, dejarlo en el extremo izquierdo lo encajaba contra la barra del ERP:
@@ -335,8 +335,13 @@ Lo que arrastró el cambio, que es lo que conviene saber para un cherry-pick:
   (`pl-[32px]` en vez de `pl-[80px]`) cuando el rail estaba presente, porque el
   rail ya ocupaba el extremo izquierdo. Sin rail ahí, la fila de navegación
   vuelve a despejarlos enteros siempre, y la prop `hasCommunityRail` desaparece.
-- `RelayConnectionOverlay.tsx`: mismo motivo — el hueco de 68 px que se apartaba
-  del rail sobra. La prop desaparece también.
+- `RelayConnectionOverlay.tsx`: **se va a la derecha con la barra**. Enseña la
+  tarjeta del pie de la barra de Buzz cuando esa barra está plegada, así que
+  dejarlo abajo a la izquierda hacía que saltara de un extremo de la pantalla al
+  otro justo al plegarla. Vuelve a apartarse del rail (56 px + 12 de aire), pero
+  ahora por la derecha: imagen especular de lo que hacía upstream.
+  `sidebar-relay-card.spec.ts` comprueba el lado, así que la decisión queda
+  protegida y no solo escrita.
 - `CommunityRail.tsx`: la pastilla del activo cuelga del borde **exterior** del
   rail (convención Discord/Slack). Con el rail a la derecha ese borde es el
   derecho: `-left-2.5 rounded-r-full` → `-right-2.5 rounded-l-full`.

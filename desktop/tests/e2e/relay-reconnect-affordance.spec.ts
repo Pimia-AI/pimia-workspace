@@ -62,7 +62,8 @@ test.describe("relay reconnect affordance", () => {
     await scrollSidebarToBottom(page);
     await settle(page);
 
-    // Frame the left sidebar directly — the relay-unreachable block lives there,
+    // Frame the Buzz sidebar directly (a la derecha desde la Fase 1) — el bloque
+    // de relay inalcanzable vive ahí,
     // and a full-window shot makes its presence/absence illegible against the
     // unrelated top connection banner.
   });
