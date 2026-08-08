@@ -5,9 +5,23 @@
 #   BUZZ_RELAY_PORT, BUZZ_RELAY_URL
 #   BUZZ_INSTANCE_SLUG, BUZZ_WORKTREE_LABEL, VITE_DEV_BRANCH (worktrees only)
 #   BUZZ_TAURI_CONFIG
+#   BUZZ_DEV_KEYRING_SERVICE
 #   BUZZ_PRIVATE_KEY (worktrees only, when BUZZ_SHARE_IDENTITY=1)
+#
+# Divergencia Pimia: aquí se decide la identidad de instancia COMPLETA —
+# identificador de bundle *y* servicio de llavero—, y a propósito no se hereda
+# ninguna de las dos del entorno. Cuando el servicio de llavero lo fijaba solo
+# `just desktop-standalone`, un valor exportado en el lanzamiento anterior
+# sobrevivía en la shell y `just dev` se lo comía: la app leía la ficha de
+# agentes de una instancia y el llavero de otra, y el agente aparecía sin clave
+# privada al arrancar ("no private key available"). El servicio se deriva ahora
+# del identificador ya calculado, así que los dos no pueden discrepar.
 
 WORKTREE_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+
+# Nada de lo que identifica a la instancia se hereda: un slug o un servicio
+# filtrados de otro worktree son exactamente el fallo que esto evita.
+unset BUZZ_INSTANCE_SLUG BUZZ_WORKTREE_LABEL BUZZ_DEV_KEYRING_SERVICE
 
 # Derive a stable base port from the worktree root so the same worktree always
 # gets the same ports. This keeps the Tauri dev config stable between runs and
@@ -25,7 +39,10 @@ if [[ "${BUZZ_RESET_WEBVIEW_STATE:-0}" == "1" ]]; then
     DEV_URL="${DEV_URL}?resetDevState=1"
 fi
 
-BUZZ_TAURI_CONFIG="{\"build\":{\"devUrl\":\"${DEV_URL}\",\"beforeDevCommand\":\"exec ./node_modules/.bin/vite --port ${BUZZ_VITE_PORT} --strictPort\"},\"identifier\":\"es.pimia.workspace.dev\",\"productName\":\"Pimia Workspace Dev\"}"
+# El identificador es la única fuente de verdad de la identidad de instancia:
+# el servicio de llavero se deriva de él al final del fichero.
+INSTANCE_IDENTIFIER="es.pimia.workspace.dev"
+BUZZ_TAURI_CONFIG="{\"build\":{\"devUrl\":\"${DEV_URL}\",\"beforeDevCommand\":\"exec ./node_modules/.bin/vite --port ${BUZZ_VITE_PORT} --strictPort\"},\"identifier\":\"${INSTANCE_IDENTIFIER}\",\"productName\":\"Pimia Workspace Dev\"}"
 unset VITE_DEV_BRANCH
 
 # In worktrees, extract a label from the branch name and derive a unique app
@@ -57,7 +74,11 @@ if git rev-parse --is-inside-work-tree &>/dev/null; then
         # identifier is kept so concurrent instances don't collide on
         # tauri-plugin-single-instance or the app data directory.
         if [[ "${BUZZ_SHARE_IDENTITY:-0}" == "1" ]]; then
-            KEYRING_SERVICE="pimia-workspace-desktop-dev"
+            # El servicio del checkout principal, que es de donde se comparte la
+            # identidad. Apuntaba al de dev sin ámbito, que en la práctica no
+            # tiene `identity`: la del checkout principal vive en `.main`, y por
+            # eso `BUZZ_SHARE_IDENTITY=1` avisaba de que no encontraba ninguna.
+            KEYRING_SERVICE="pimia-workspace-desktop-dev.main"
             KEYRING_BLOB=""
             case "$(uname -s)" in
                 Darwin)
@@ -103,9 +124,24 @@ if git rev-parse --is-inside-work-tree &>/dev/null; then
         if swift "$GENERATE_DEV_ICON" "$BASE_ICON" "$DEV_ICON" "$BUZZ_WORKTREE_LABEL"; then
             echo "🌳 Worktree: ${BUZZ_WORKTREE_LABEL}"
             export VITE_DEV_BRANCH="$BUZZ_WORKTREE_LABEL"
-            BUZZ_TAURI_CONFIG="{\"build\":{\"devUrl\":\"${DEV_URL}\",\"beforeDevCommand\":\"exec ./node_modules/.bin/vite --port ${BUZZ_VITE_PORT} --strictPort\"},\"identifier\":\"es.pimia.workspace.dev.${BUZZ_INSTANCE_SLUG}\",\"productName\":\"Pimia Workspace Dev (${BUZZ_WORKTREE_LABEL})\",\"bundle\":{\"icon\":[\"$DEV_ICON\"]}}"
+            # El identificador se etiqueta aquí y solo aquí; el llavero lo sigue.
+            # Si la generación del icono falla, el bloque no entra y la instancia
+            # se queda en la principal *entera* — identificador y llavero a la
+            # vez—, en vez de mezclar el directorio de datos de una con el
+            # llavero de otra.
+            INSTANCE_IDENTIFIER="es.pimia.workspace.dev.${BUZZ_INSTANCE_SLUG}"
+            BUZZ_TAURI_CONFIG="{\"build\":{\"devUrl\":\"${DEV_URL}\",\"beforeDevCommand\":\"exec ./node_modules/.bin/vite --port ${BUZZ_VITE_PORT} --strictPort\"},\"identifier\":\"${INSTANCE_IDENTIFIER}\",\"productName\":\"Pimia Workspace Dev (${BUZZ_WORKTREE_LABEL})\",\"bundle\":{\"icon\":[\"$DEV_ICON\"]}}"
         fi
     fi
 fi
+
+# Servicio de llavero, derivado del identificador ya definitivo. Sufijo vacío
+# (checkout principal) ⇒ `.main`, que es donde el arranque documentado ha venido
+# escribiendo siempre; con sufijo ⇒ el mismo slug del worktree. Al derivarlo del
+# identificador, ficha de agentes y llavero no pueden apuntar a instancias
+# distintas.
+INSTANCE_SCOPE="${INSTANCE_IDENTIFIER#es.pimia.workspace.dev}"
+INSTANCE_SCOPE="${INSTANCE_SCOPE#.}"
+export BUZZ_DEV_KEYRING_SERVICE="pimia-workspace-desktop-dev.${INSTANCE_SCOPE:-main}"
 
 export BUZZ_TAURI_CONFIG

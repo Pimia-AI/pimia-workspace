@@ -498,6 +498,11 @@ documentado con `${BUZZ_INSTANCE_SLUG:-main}`—, que tiene identidad pero **no*
 onboarding de Buzz, pero **hay que reconectar Pimia una vez**. A cambio, la
 conexión deja de evaporarse en cada cambio de rama, que era el problema.
 
+> **Actualización (misma fecha, entrada de más abajo).** Ese peaje ya no se
+> paga: `.main` es ahora el servicio canónico *declarado* y el vault de tenants
+> se migra al arrancar en vez de pedir que se reconecte. Ver
+> «`just dev` se quedaba con el llavero del worktree anterior».
+
 ### 2026-08-08 — El pase de diseño del ERP (patrones de la referencia)
 
 Trabajo casi todo dentro de `desktop/src/features/pimia/`, que es nuestro y no
@@ -587,3 +592,92 @@ generador de TanStack Router que cuestan media hora si no se conocen:
    generada. Se vio literalmente: el fichero volvía a su tamaño exacto anterior
    segundos después de generarlo bien. **Antes de añadir rutas, comprobar que
    no queda ninguno**: `pgrep -fl "vite|buzz-desktop"`.
+
+### 2026-08-08 — `just dev` se quedaba con el llavero del worktree anterior
+
+**El síntoma**: pulsar «arrancar» en un agente daba *«agent 2e2654ad… has no
+private key available — the OS keyring may be unreachable. Refusing to start
+without an identity»*. El llavero estaba perfecto: la clave existía y se leía sin
+problema. Lo que no cuadraba era **en qué cajón** se la buscaba.
+
+**La causa**: la identidad de instancia se decidía en dos sitios distintos.
+
+| Qué | Quién lo fijaba | Resultado |
+|---|---|---|
+| Identificador de bundle | `scripts/instance-env.sh`, desde el worktree de git | sólido |
+| Servicio de llavero | **solo** la receta `desktop-standalone` | heredable |
+
+`just dev`, `staging` y `production` no fijaban `BUZZ_DEV_KEYRING_SERVICE` **ni lo
+limpiaban**, así que un valor exportado por un lanzamiento anterior sobrevivía en
+la shell. El proceso que lo destapó llevaba
+`BUZZ_DEV_KEYRING_SERVICE=pimia-workspace-desktop-dev.claude-fase1-cierre-login`
+con `identifier=es.pimia.workspace.dev`: **ficha de agentes de la instancia
+principal, llavero del worktree fase1**. `hydrate_keys` pedía
+`agent:2e2654ad…` al cajón equivocado, el llavero contestaba «no existe», y
+`spawn_key_refusal` se negaba a arrancar sin identidad — correctamente, porque
+lanzar con `BUZZ_PRIVATE_KEY` vacío es lanzar sin identidad.
+
+Quedaba a la vista en el propio directorio de datos, con los dos marcadores de
+migración conviviendo:
+
+```
+~/Library/Application Support/es.pimia.workspace.dev/
+  identity.pimia-workspace-desktop-dev.main.migrated                    (08:41)
+  identity.pimia-workspace-desktop-dev.claude-fase1-cierre-login.migrated (18:12)
+```
+
+**El arreglo, en una frase**: el servicio de llavero se deriva del identificador
+ya calculado, en `instance-env.sh`, y se exporta **siempre**.
+
+```bash
+unset BUZZ_INSTANCE_SLUG BUZZ_WORKTREE_LABEL BUZZ_DEV_KEYRING_SERVICE   # nada se hereda
+INSTANCE_SCOPE="${INSTANCE_IDENTIFIER#es.pimia.workspace.dev}"          # "" o ".<slug>"
+INSTANCE_SCOPE="${INSTANCE_SCOPE#.}"                                    # "" o "<slug>"
+export BUZZ_DEV_KEYRING_SERVICE="pimia-workspace-desktop-dev.${INSTANCE_SCOPE:-main}"
+```
+
+Detalles que importan:
+
+- **`.main` es el canónico declarado**, también dentro de la app: el defecto de
+  `dev_keyring_service(None)` deja de ser el servicio pelado. Un arranque que no
+  pase por las recetas (`cargo run`, un `tauri dev` a mano) cae en el mismo cajón
+  que el checkout principal en vez de estrenar uno.
+- **El fallo de generación del icono ya no parte la instancia.** El
+  identificador se etiqueta dentro del `if swift …`; el llavero lo sigue, así que
+  si el icono falla se cae a la instancia principal *entera* en vez de mezclar el
+  directorio de datos de una con el llavero de otra.
+- **`BUZZ_SHARE_IDENTITY=1` leía donde no había nada.** Buscaba la identidad del
+  checkout principal en el servicio pelado, que no tiene `identity`; está en
+  `.main`. De ahí el aviso «no identity found in keyring service».
+- **`reset-desktop-dev-state.sh` reseteaba a medias.** Borraba los directorios de
+  datos de *todas* las instancias de dev pero solo el llavero pelado: identidad y
+  claves de agentes de `.main` y de cada worktree sobrevivían al «borrado». Ahora
+  enumera el linaje `pimia-workspace-desktop-dev.*` y los borra todos.
+- **El aviso mentía y mandaba a diagnosticar al revés.** `hydrate_keys` sí
+  distingue ausencia de caída (loguea «has no key in JSON or keyring»), pero
+  `spawn_key_refusal` funde los dos casos en «the OS keyring may be
+  unreachable». El texto se deja como está —el fail-closed es correcto— pero
+  conviene saber que «unreachable» puede querer decir «en otro cajón».
+
+**La migración, para no pagar el peaje.** Al declarar `.main` canónico, lo que
+quedó en el cajón pelado dejaría de verse. `migrate_unscoped_dev_keyring()` lo
+levanta al arrancar: una sola vez (marca `_unscoped_dev_migration_v1` dentro del
+blob canónico), sin pisar nada existente —`identity` y `agent:<pubkey>` vivos
+mandan siempre, porque sobreescribirlos resucitaría una clave rotada— y sin
+mover el original, así que un binario anterior sigue encontrando lo suyo. Si la
+lectura del cajón heredado falla, **no** se escribe la marca: se reintenta en el
+arranque siguiente en vez de dar por migrado lo que no se leyó.
+
+**Verificación**: `scripts/test-instance-env-keyring-scope.sh` comprueba el
+invariante —identificador y llavero describen la misma instancia— desde el
+checkout principal y desde un worktree, con y sin valores filtrados en el
+entorno. Se ejecuta a mano, como su vecino
+`test-reset-desktop-standalone-state.sh`.
+
+**Una trampa de `security(1)`, de regalo.** Escribir el blob del llavero por
+stdin lo **trunca a 128 bytes** sin avisar: es el buffer del prompt interactivo.
+Un blob con identidad y tres nsecs pasa de eso, así que la entrada quedó cortada
+a la mitad de un valor. El único camino fiel es `-w <valor>` por argumento.
+Cualquier script que toque el blob debe releer y comparar byte a byte después de
+escribir, con copia previa: `security` reemplaza la entrada **entera**, así que
+una escritura a medias se lleva identidad y claves de agentes por delante.
