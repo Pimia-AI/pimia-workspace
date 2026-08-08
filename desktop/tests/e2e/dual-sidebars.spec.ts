@@ -40,6 +40,10 @@ test("cada barra vive en su lado", async ({ page }) => {
 });
 
 test("plegar una barra no toca la otra", async ({ page }) => {
+  // La ventana por defecto de los e2e (1280) está por debajo de
+  // PIMIA_SIDEBAR_COMPACT_BREAKPOINT_PX, así que la barra del ERP arrancaría
+  // plegada. Este test prueba su comportamiento desplegada.
+  await page.setViewportSize({ height: 900, width: 1600 });
   await installMockBridge(page);
   await page.goto("/");
 
@@ -72,6 +76,10 @@ test("plegar una barra no toca la otra", async ({ page }) => {
 });
 
 test("cada barra recuerda su propia anchura", async ({ page }) => {
+  // La ventana por defecto de los e2e (1280) está por debajo de
+  // PIMIA_SIDEBAR_COMPACT_BREAKPOINT_PX, así que la barra del ERP arrancaría
+  // plegada. Este test prueba su comportamiento desplegada.
+  await page.setViewportSize({ height: 900, width: 1600 });
   await page.addInitScript(() => {
     window.localStorage.setItem("buzz-sidebar-width", "360");
     window.localStorage.setItem("pimia-workspace-sidebar-width", "220");
@@ -93,6 +101,10 @@ test("cada barra recuerda su propia anchura", async ({ page }) => {
 test("la barra del ERP colapsa a iconos, no fuera de pantalla", async ({
   page,
 }) => {
+  // La ventana por defecto de los e2e (1280) está por debajo de
+  // PIMIA_SIDEBAR_COMPACT_BREAKPOINT_PX, así que la barra del ERP arrancaría
+  // plegada. Este test prueba su comportamiento desplegada.
+  await page.setViewportSize({ height: 900, width: 1600 });
   await installMockBridge(page);
   await page.goto("/");
 
@@ -129,6 +141,7 @@ test("la nav del ERP lleva a sus módulos", async ({ page }) => {
 });
 
 test("en una ventana estrecha el ERP se pliega solo", async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 1600 });
   await installMockBridge(page);
   await page.goto("/");
 
@@ -138,8 +151,8 @@ test("en una ventana estrecha el ERP se pliega solo", async ({ page }) => {
     .poll(async () => Math.round((await pimia.boundingBox())?.width ?? 0))
     .toBeGreaterThan(48);
 
-  // Con dos barras permanentes el contenido paga 548 px de cromo. Por debajo
-  // de PIMIA_SIDEBAR_COMPACT_BREAKPOINT_PX la nav del ERP devuelve 200 px al
+  // Con dos barras abiertas el contenido paga 548 px de cromo. Por debajo de
+  // PIMIA_SIDEBAR_COMPACT_BREAKPOINT_PX la nav del ERP devuelve 200 px al
   // contenido en vez de ahogar el hilo de mensajes o la hoja de gestión.
   await page.setViewportSize({ height: 720, width: 820 });
   await expect
@@ -147,7 +160,7 @@ test("en una ventana estrecha el ERP se pliega solo", async ({ page }) => {
     .toBe(48);
 
   // Y los recupera al volver a haber sitio.
-  await page.setViewportSize({ height: 720, width: 1440 });
+  await page.setViewportSize({ height: 900, width: 1600 });
   await expect
     .poll(async () => Math.round((await pimia.boundingBox())?.width ?? 0))
     .toBeGreaterThan(48);

@@ -1622,11 +1622,6 @@ test("thread panel width uses session storage and reset handle", async ({
     );
   }, customWidthPx);
 
-  // Con las dos barras de la Fase 1 el contenido de una ventana de 1280 no da
-  // para un panel de 520 px, y el ancho guardado se recortaría. Lo que este
-  // test protege es que el ancho de sessionStorage se respeta, no cuánto mide
-  // la ventana: se ensancha para dejar sitio.
-  await page.setViewportSize({ height: 720, width: 1600 });
   await page.goto("/");
   await page.getByTestId("channel-general").click();
   await expect(page.getByTestId("chat-title")).toHaveText("general");

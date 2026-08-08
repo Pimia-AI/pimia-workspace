@@ -295,28 +295,30 @@ alguien necesita «solo un dato» del relay.
 `just desktop-tauri-fmt` falla en worktrees. Aplicada; `cargo fmt --check` del
 crate Tauri queda en verde.
 
-### Pendiente conocido de la Fase 1: el coste horizontal de la segunda barra
+### El coste horizontal de la segunda barra, y dónde se paga
 
-Con dos barras permanentes el contenido paga **548 px de cromo** (248 + 300)
-donde antes pagaba 300. En una ventana de 1280 eso deja 732 px, y varias
-superficies de upstream cruzan ahí sus propios umbrales responsive.
+Con las dos barras abiertas el contenido paga **548 px de cromo** (248 + 300)
+donde upstream pagaba 300. Varias superficies de Buzz —la revisión de diffs, el
+dock de subida, la barra de acciones de un mensaje, las listas de Projects—
+tienen sus propios umbrales responsive alrededor de los **950 px de contenido**,
+y por debajo se degradan.
 
-Mitigado: por debajo de `PIMIA_SIDEBAR_COMPACT_BREAKPOINT_PX` (1100) la barra
-del ERP se pliega sola a iconos y devuelve 200 px. El usuario puede volver a
-abrirla a mano.
+La mitigación es `PIMIA_SIDEBAR_COMPACT_BREAKPOINT_PX` (**1400**, en
+`app/sidebarScopes.ts`): por debajo de esa anchura de ventana la barra del ERP
+se pliega sola a iconos y devuelve 200 px. En una pantalla de portátil (1512
+lógicos) las dos barras se ven abiertas; en una ventana más estrecha la nav del
+ERP es una rejilla de iconos. El efecto solo actúa **al cruzar** el umbral: el
+usuario puede volver a abrirla a mano.
 
-Lo que queda anotado, por si molesta en uso real:
+El número no es arbitrario: se midió corriendo la suite de e2e contra el commit
+base y contra este. Con el umbral en 1100, cuatro specs de upstream que pasan en
+`7eda23e63` fallaban a 1280 (reacción con emoji personalizado, dock de subida,
+dos de revisión de PR). Con 1400 vuelven a pasar todos.
 
-- **Projects, en ventana estrecha**: con menos de ~800 px de contenido, la
-  columna de resumen de la lista de proyectos y la de repositorios se desalinean
-  36 px. Es comportamiento responsive de upstream, no del shell; el spec
-  `project-commit-detail.spec.ts` mide alineación de columnas y se le da una
-  ventana donde esa comparación significa algo.
-- **El `RelayConnectionOverlay` sigue apareciendo abajo a la izquierda** cuando
-  la barra de Buzz está plegada, aunque la tarjeta que muestra viva en el pie de
-  esa barra, que ahora está a la derecha. Se le ha quitado el hueco de 68 px que
-  reservaba para el rail (ya no está ahí), pero cambiarlo de lado es otra
-  decisión de disposición: pendiente del fundador.
+**Lo único que queda tocado por aritmética**: `channels.spec.ts` comprueba que
+en una ventana de 820 px la hoja de gestión de canal se queda con el área de
+contenido entera, y el umbral era `> 500`. Ahí el cromo son 348 px (la barra del
+ERP ya plegada) en vez de 300, así que el máximo posible es 472: pasa a `> 450`.
 
 ### 2026-08-08 — El rail de comunidades se va a la derecha (👤 fundador)
 

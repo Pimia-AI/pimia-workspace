@@ -26,22 +26,29 @@ export const BUZZ_SIDEBAR_SCOPE: SidebarScope = {
 };
 
 /**
+ * Por debajo de esta anchura de ventana, la barra del ERP se pliega sola a
+ * iconos.
+ *
+ * De dónde sale el número, porque no es arbitrario. Con las dos barras abiertas
+ * el contenido paga **548 px de cromo** (248 + 300) donde upstream pagaba 300.
+ * Varias superficies de Buzz —la revisión de diffs, el dock de subida, la barra
+ * de acciones de un mensaje— tienen sus propios umbrales responsive alrededor
+ * de los 950 px de contenido, y por debajo de eso se degradan. 1400 es la
+ * anchura de ventana a partir de la cual las dos barras abiertas dejan ese
+ * margen: 1400 − 548 = 852 con la del ERP abierta, 1400 − 348 = 1052 plegada.
+ *
+ * Consecuencia práctica: en una pantalla de portátil (1512 lógicos) las dos
+ * barras se ven abiertas; en una ventana más estrecha la nav del ERP se
+ * convierte en una rejilla de iconos y devuelve 200 px al contenido. El efecto
+ * solo actúa **al cruzar** el umbral: el usuario puede volver a abrirla a mano.
+ */
+export const PIMIA_SIDEBAR_COMPACT_BREAKPOINT_PX = 1400;
+
+/**
  * La barra del ERP. Es la navegación primaria del workspace, así que colapsa a
  * iconos (`collapsible="icon"`) en vez de irse fuera de pantalla: nunca se
  * queda sin una superficie desde la que volver a abrirla.
  */
-/**
- * Por debajo de esta anchura de ventana, la barra del ERP se pliega sola a
- * iconos.
- *
- * Con dos barras permanentes el contenido paga 548 px de cromo (248 + 300), y
- * en una ventana estrecha eso deja al hilo de mensajes o a la hoja de gestión
- * de canal sin sitio. Plegar la nav primaria a 48 px devuelve 200 px justo
- * cuando hacen falta, y el usuario puede volver a abrirla a mano: el efecto
- * solo actúa al cruzar el umbral, no lo bloquea.
- */
-export const PIMIA_SIDEBAR_COMPACT_BREAKPOINT_PX = 1100;
-
 export const PIMIA_SIDEBAR_SCOPE: SidebarScope = {
   id: "pimia",
   cookieName: "pimia_sidebar_state",
