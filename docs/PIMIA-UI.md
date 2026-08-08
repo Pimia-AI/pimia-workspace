@@ -39,8 +39,30 @@ aprovechar para el listado de facturas»). De arriba abajo, y en este orden:
 6. **Pie** — el total en pantalla cuando hay dinero, el recuento, cuántas filas
    por página y la navegación.
 
-El detalle es el mismo lenguaje en otra forma: identidad y acciones arriba,
-secciones tituladas debajo, metadatos como pares etiqueta-valor.
+## La anatomía de una ficha
+
+El detalle es el mismo lenguaje en otra forma, y `PimiaEstimateScreen` es el
+molde que la factura hereda:
+
+1. **Vuelta a la lista** encima del título.
+2. **El número ES el título** (en monoespaciada), con el estado a su lado y el
+   cliente debajo; la acción contextual a la derecha.
+3. **Metadatos** en pares etiqueta-valor, sin repetir lo que ya dice la
+   cabecera.
+4. **Las líneas** en una tabla: concepto y su descripción apagada, cantidad con
+   su unidad, precio y el importe a la derecha.
+5. **El desglose** —base, descuento, impuestos, total— en una caja estrecha a
+   la derecha, alineado con la columna del dinero. Cada fila solo sale si el
+   servidor la manda con valor.
+6. **Notas**, si las hay.
+
+⚠️ **La ficha no recalcula nada.** Los importes se pintan tal como los devuelve
+el servidor, la suma incluida: las invariantes fiscales son suyas y una segunda
+aritmética aquí solo serviría para discrepar de la factura de verdad.
+
+Las líneas solo vienen en el `show`, y envueltas en un `when(...)`: por eso
+`lines` es `null` («no se pidieron») y no `[]` («no tiene»). Son cosas
+distintas y la UI las distingue.
 
 ### Lo que el servidor sabe hacer, y hay que usar
 
@@ -95,9 +117,11 @@ Así entraron `table` (cero dependencias nuevas) y `select`
   («Past-due balance»); la API de Pimia no publica ningún agregado de dinero de
   presupuestos, y sumar una página para llamarlo total es exactamente el bug
   que este pase quitó del panel. Van recuentos hasta que el servidor sume.
-- **Detalle de un presupuesto.** No existe desde la Fase 1. Por eso el menú `…`
-  solo ofrece acciones que hoy hacen algo: un «ver detalle» en gris sería el
-  mismo señuelo que una fila que se resalta y no abre nada.
+- **Acciones de documento en el menú `…`** (enviar, duplicar, convertir a
+  factura, PDF). Existen en la API pero no en `features/pimia/api/`, y varias
+  son irreversibles o salen hacia fuera: entran cuando se diseñen, no de
+  relleno. Hoy el menú ofrece ver la ficha, ver el cliente y copiar el número —
+  todo lo que aparezca ahí tiene que hacer algo.
 
 > **Corregido el 2026-08-08.** Este apartado decía que las cabeceras ordenables
 > y el filtro de fechas eran imposibles «porque la API no los acepta». Era

@@ -69,7 +69,7 @@ function count(total: number | null | undefined) {
 
 export function PimiaScreen() {
   const tenant = useActivePimiaTenant();
-  const { goPimiaPath } = useAppNavigation();
+  const { goPimiaCustomer, goPimiaEstimate, goPimiaPath } = useAppNavigation();
   const customersQuery = usePimiaCustomersQuery({ limit: 1 });
   const estimatesQuery = usePimiaEstimatesQuery({ limit: 5 });
   // Solo se lee el recuento: `limit: 1` para no traerse la lista entera por
@@ -151,7 +151,11 @@ export function PimiaScreen() {
         ) : null}
         {recent.length > 0 ? (
           <div className="overflow-hidden rounded-lg border border-border">
-            <PimiaEstimateList estimates={recent} />
+            <PimiaEstimateList
+              estimates={recent}
+              onOpen={(id) => void goPimiaEstimate(id)}
+              onOpenCustomer={(customerId) => void goPimiaCustomer(customerId)}
+            />
           </div>
         ) : null}
       </section>

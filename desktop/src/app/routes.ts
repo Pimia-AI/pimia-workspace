@@ -7,6 +7,10 @@ export const routes = rootRoute("root.tsx", [
   route("/pimia/clientes", "pimia.clientes.tsx"),
   route("/pimia/clientes/$customerId", "pimia.clientes.$customerId.tsx"),
   route("/pimia/presupuestos", "pimia.presupuestos.tsx"),
+  route(
+    "/pimia/presupuestos/$estimateId",
+    "pimia.presupuestos.$estimateId.tsx",
+  ),
   route("/pulse", "pulse.tsx"),
   route("/reminders", "reminders.tsx"),
   route("/settings", "settings.tsx"),

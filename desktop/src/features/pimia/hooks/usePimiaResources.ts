@@ -15,6 +15,7 @@ import {
 } from "@/features/pimia/api/customers";
 import {
   createEstimate,
+  getEstimate,
   listEstimates,
   type ListEstimatesInput,
   type PimiaEstimateDraft,
@@ -43,6 +44,16 @@ export function usePimiaCustomerQuery(customerId: string | undefined) {
     queryKey: dataKey(tenant?.id, "customer", customerId),
     queryFn: () => getCustomer(customerId as string),
     enabled: Boolean(tenant) && Boolean(customerId),
+  });
+}
+
+export function usePimiaEstimateQuery(estimateId: string | undefined) {
+  const tenant = useActivePimiaTenant();
+
+  return useQuery({
+    queryKey: dataKey(tenant?.id, "estimate", estimateId),
+    queryFn: () => getEstimate(estimateId as string),
+    enabled: Boolean(tenant) && Boolean(estimateId),
   });
 }
 

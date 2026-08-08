@@ -36,16 +36,38 @@ export const ESTIMATE_STATUSES = [
 
 export type PimiaEstimateStatus = (typeof ESTIMATE_STATUSES)[number];
 
+/** Una línea del presupuesto. Los importes, en céntimos enteros. */
+export type PimiaEstimateLine = {
+  id: string;
+  name: string;
+  description: string | null;
+  quantity: number | null;
+  unitName: string | null;
+  priceCents: number | null;
+  discountCents: number | null;
+  taxCents: number | null;
+  totalCents: number | null;
+};
+
 export type PimiaEstimate = {
   id: string;
   estimateNumber: string;
+  referenceNumber: string | null;
   status: PimiaEstimateStatus | string;
   estimateDate: string | null;
   expiryDate: string | null;
   customerId: string | null;
   customerName: string | null;
+  notes: string | null;
+  /**
+   * Las líneas solo vienen en el detalle (`show`), y solo si las hay: el
+   * recurso las envuelve en un `when(...)`. `null` es «no se pidieron», que no
+   * es lo mismo que `[]`, «no tiene».
+   */
+  lines: PimiaEstimateLine[] | null;
   /** Todos en céntimos enteros. */
   subTotalCents: number | null;
+  discountCents: number | null;
   taxCents: number | null;
   totalCents: number | null;
 };
@@ -80,17 +102,50 @@ function text(value: unknown): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
+/** La cantidad puede venir como número o como cadena, y puede ser decimal. */
+function readQuantity(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value.replace(",", "."));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function normalizeLine(raw: Record<string, unknown>): PimiaEstimateLine {
+  return {
+    id: String(raw.id ?? ""),
+    name: text(raw.name) ?? "(sin concepto)",
+    description: text(raw.description),
+    quantity: readQuantity(raw.quantity),
+    unitName: text(raw.unit_name),
+    priceCents: readCents(raw.price),
+    discountCents: readCents(raw.discount_val),
+    taxCents: readCents(raw.tax),
+    totalCents: readCents(raw.total),
+  };
+}
+
 function normalizeEstimate(raw: RawEstimate): PimiaEstimate {
   const customer = raw.customer as Record<string, unknown> | undefined;
+  const items = raw.items;
   return {
     id: String(raw.id ?? ""),
     estimateNumber: text(raw.estimate_number) ?? "(sin número)",
+    referenceNumber: text(raw.reference_number),
     status: text(raw.status) ?? "DRAFT",
     estimateDate: text(raw.estimate_date),
     expiryDate: text(raw.expiry_date),
     customerId: raw.customer_id === undefined ? null : String(raw.customer_id),
     customerName: customer ? text(customer.name) : null,
+    notes: text(raw.notes),
+    lines: Array.isArray(items)
+      ? items.map((item) => normalizeLine(item as Record<string, unknown>))
+      : null,
     subTotalCents: readCents(raw.sub_total),
+    discountCents: readCents(raw.discount_val),
     taxCents: readCents(raw.tax),
     totalCents: readCents(raw.total),
   };

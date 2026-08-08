@@ -83,6 +83,22 @@ test("la lista de presupuestos en oscuro", async ({ page }) => {
   await shoot(page, "presupuestos-oscuro");
 });
 
+test("la ficha de un presupuesto", async ({ page }) => {
+  await boot(page);
+  await page.getByTestId("pimia-nav-estimates").click();
+  await page.getByTestId("pimia-estimate-open-132").click();
+  await expect(page.getByTestId("pimia-estimate-lines")).toBeVisible();
+  await shoot(page, "presupuesto-ficha");
+});
+
+test("la ficha de un presupuesto en oscuro", async ({ page }) => {
+  await boot(page, { theme: "buzz-dark" });
+  await page.getByTestId("pimia-nav-estimates").click();
+  await page.getByTestId("pimia-estimate-open-132").click();
+  await expect(page.getByTestId("pimia-estimate-lines")).toBeVisible();
+  await shoot(page, "presupuesto-ficha-oscuro");
+});
+
 test("los presupuestos sin nada que enseñar", async ({ page }) => {
   await boot(page, { empty: true });
   await page.getByTestId("pimia-nav-estimates").click();

@@ -273,6 +273,57 @@ function estimate(
   };
 }
 
+type RawLine = {
+  name: string;
+  description: string | null;
+  quantity: number;
+  unit_name: string | null;
+  price: number;
+  discount_val: number;
+  tax: number;
+  total: number;
+};
+
+/**
+ * Las líneas de los presupuestos que tienen ficha. Solo hacen falta las de los
+ * que el spec de capturas abre; el resto sale con «sin líneas», que también es
+ * un estado que conviene tener retratado.
+ */
+const LINES: Record<string, RawLine[]> = {
+  "132": [
+    {
+      name: "Rehabilitación de fachada",
+      description: "Saneado, mallado y mortero monocapa. 240 m².",
+      quantity: 240,
+      unit_name: "m²",
+      price: 5_400,
+      discount_val: 0,
+      tax: 272_160,
+      total: 1_296_000,
+    },
+    {
+      name: "Montaje y desmontaje de andamio",
+      description: "Homologado, incluye lonas y red de protección.",
+      quantity: 1,
+      unit_name: null,
+      price: 285_000,
+      discount_val: 0,
+      tax: 59_850,
+      total: 285_000,
+    },
+    {
+      name: "Gestión de residuos",
+      description: null,
+      quantity: 3,
+      unit_name: "contenedor",
+      price: 21_000,
+      discount_val: 0,
+      tax: 13_230,
+      total: 63_000,
+    },
+  ],
+};
+
 export type PimiaMockOptions = {
   /** Sin tenant conectado: la pantalla de bienvenida del ERP. */
   disconnected?: boolean;
@@ -288,7 +339,7 @@ export async function installPimiaMock(
   options: PimiaMockOptions = {},
 ) {
   await page.addInitScript(
-    ({ customers, estimates, opts, tenant }) => {
+    ({ customers, estimates, lines: LINES, opts, tenant }) => {
       const status = opts.disconnected
         ? { tenants: [], activeTenantId: null }
         : { tenants: [tenant], activeTenantId: tenant.id };
@@ -394,6 +445,28 @@ export async function installPimiaMock(
           return listPayload(rows, allEstimates, "estimate_total_count", query);
         }
 
+        if (clean.startsWith("/estimates/")) {
+          const id = decodeURIComponent(clean.slice("/estimates/".length));
+          const found = allEstimates.find((estimate) => estimate.id === id);
+          if (!found) {
+            return null;
+          }
+          // El `show` de la API sí trae las líneas y las notas; el índice, no.
+          return {
+            data: {
+              ...found,
+              reference_number: `OBRA-${found.id}`,
+              notes:
+                "Precios válidos salvo variación del coste de materiales. No incluye licencias ni tasas municipales.",
+              items: (LINES[found.id] ?? []).map((line, index) => ({
+                ...line,
+                id: `${found.id}-${index + 1}`,
+                estimate_id: found.id,
+              })),
+            },
+          };
+        }
+
         if (clean === "/next-number") {
           return { next_number: "PRE-000134" };
         }
@@ -446,6 +519,7 @@ export async function installPimiaMock(
     {
       customers: CUSTOMERS,
       estimates: ESTIMATES,
+      lines: LINES,
       opts: {
         disconnected: options.disconnected ?? false,
         empty: options.empty ?? false,

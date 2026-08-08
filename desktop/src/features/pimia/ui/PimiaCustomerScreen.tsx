@@ -72,7 +72,7 @@ function DetailGrid({ rows }: { rows: DetailRow[] }) {
 export function PimiaCustomerScreen({ customerId }: { customerId: string }) {
   const tenant = useActivePimiaTenant();
   const [isCreateOpen, setIsCreateOpen] = React.useState(false);
-  const { goPimiaPath } = useAppNavigation();
+  const { goPimiaEstimate, goPimiaPath } = useAppNavigation();
   const customerQuery = usePimiaCustomerQuery(customerId);
   const estimatesQuery = usePimiaEstimatesQuery({ customerId, limit: 50 });
 
@@ -179,6 +179,7 @@ export function PimiaCustomerScreen({ customerId }: { customerId: string }) {
               <div className="overflow-hidden rounded-lg border border-border">
                 <PimiaEstimateList
                   estimates={estimates}
+                  onOpen={(id) => void goPimiaEstimate(id)}
                   showCustomer={false}
                   totalCents={estimates.reduce(
                     (total, estimate) => total + (estimate.totalCents ?? 0),

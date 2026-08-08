@@ -14,7 +14,7 @@
  * rellenar el hueco por simetría sería inventar densidad.
  */
 
-import { Copy, MoreHorizontal, User } from "lucide-react";
+import { Copy, FileText, MoreHorizontal, User } from "lucide-react";
 
 import type {
   PimiaEstimate,
@@ -63,6 +63,8 @@ export type PimiaEstimateSort = PimiaSortState<PimiaEstimateSortField>;
 
 type PimiaEstimateListProps = {
   estimates: PimiaEstimate[];
+  /** Abre la ficha del presupuesto. Sin esto el número no es un enlace. */
+  onOpen?: (estimateId: string) => void;
   /** Abre la ficha del cliente del presupuesto. */
   onOpenCustomer?: (customerId: string) => void;
   onSortChange?: (sort: PimiaEstimateSort) => void;
@@ -76,6 +78,7 @@ type PimiaEstimateListProps = {
 
 export function PimiaEstimateList({
   estimates,
+  onOpen,
   onOpenCustomer,
   onSortChange,
   showCustomer = true,
@@ -142,8 +145,23 @@ export function PimiaEstimateList({
             data-testid={`pimia-estimate-${estimate.id}`}
             key={estimate.id}
           >
-            <TableCell className="whitespace-nowrap py-2.5 pl-3 font-mono font-medium text-foreground">
-              {estimate.estimateNumber}
+            <TableCell className="whitespace-nowrap py-2.5 pl-3">
+              {onOpen ? (
+                // El número es el enlace a la ficha: un botón de verdad, para
+                // que el teclado llegue igual que el ratón.
+                <button
+                  className="rounded-sm font-mono font-medium text-foreground outline-hidden hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                  data-testid={`pimia-estimate-open-${estimate.id}`}
+                  onClick={() => onOpen(estimate.id)}
+                  type="button"
+                >
+                  {estimate.estimateNumber}
+                </button>
+              ) : (
+                <span className="font-mono font-medium text-foreground">
+                  {estimate.estimateNumber}
+                </span>
+              )}
             </TableCell>
             {showCustomer ? (
               <TableCell className="max-w-0 truncate py-2.5 font-medium text-foreground">
@@ -174,6 +192,7 @@ export function PimiaEstimateList({
             <TableCell className="py-2.5 pr-2 text-right">
               <PimiaEstimateRowActions
                 estimate={estimate}
+                onOpen={onOpen}
                 onOpenCustomer={onOpenCustomer}
               />
             </TableCell>
@@ -198,15 +217,14 @@ export function PimiaEstimateList({
   );
 }
 
-/**
- * Solo acciones que hoy hacen algo. Un menú con «ver detalle» en gris sería el
- * mismo señuelo que la fila que se resalta y no abre nada.
- */
+/** Solo acciones que hoy hacen algo: nada en gris que prometa y no cumpla. */
 function PimiaEstimateRowActions({
   estimate,
+  onOpen,
   onOpenCustomer,
 }: {
   estimate: PimiaEstimate;
+  onOpen?: (estimateId: string) => void;
   onOpenCustomer?: (customerId: string) => void;
 }) {
   const customerId = estimate.customerId;
@@ -225,6 +243,12 @@ function PimiaEstimateRowActions({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
+        {onOpen ? (
+          <DropdownMenuItem onSelect={() => onOpen(estimate.id)}>
+            <FileText className="h-4 w-4" />
+            Ver el presupuesto
+          </DropdownMenuItem>
+        ) : null}
         {customerId && onOpenCustomer ? (
           <DropdownMenuItem onSelect={() => onOpenCustomer(customerId)}>
             <User className="h-4 w-4" />

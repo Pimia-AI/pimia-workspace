@@ -121,7 +121,7 @@ export function PimiaEstimatesScreen() {
   });
   const [pageSize, setPageSize] = React.useState(PAGE_SIZES[0]);
   const [page, setPage] = React.useState(1);
-  const { goPimiaCustomer, goPimiaPath } = useAppNavigation();
+  const { goPimiaCustomer, goPimiaEstimate, goPimiaPath } = useAppNavigation();
 
   // La búsqueda va contra la API del tenant, no contra una lista en memoria:
   // una petición por tecla es una petición por tecla.
@@ -320,6 +320,7 @@ export function PimiaEstimatesScreen() {
         <div className="overflow-hidden rounded-lg border border-border">
           <PimiaEstimateList
             estimates={estimates}
+            onOpen={(id) => void goPimiaEstimate(id)}
             onOpenCustomer={(customerId) => void goPimiaCustomer(customerId)}
             onSortChange={(next) => {
               setSort(next);

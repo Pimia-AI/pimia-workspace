@@ -565,3 +565,25 @@ Pimia sí sabe ordenar y filtrar por fecha** (`orderByField`/`orderBy`,
 ignora los filtros** — es un `count()` aparte del controlador. El total honesto
 para un pie de lista es el del paginador. Detalle y aviso en
 [`docs/PIMIA-UI.md`](PIMIA-UI.md) y en `readCompanyCount()`.
+
+### 2026-08-08 — ⚠️ `routeTree.gen.ts` y el `tauri dev` zombi
+
+Añadir una ruta (`/pimia/presupuestos/$estimateId`) destapó dos trampas del
+generador de TanStack Router que cuestan media hora si no se conocen:
+
+1. **`vite build` NO regenera el árbol de rutas.** El plugin lo genera en modo
+   **dev**. Con `pnpm build:e2e` (que es `tsc && vite build`) el typecheck falla
+   con `'/pimia/…' is not assignable to keyof FileRoutesByPath` y el build
+   posterior no lo arregla. La receta: levantar el dev un momento y matarlo.
+
+   ```bash
+   npx vite --port 41227 --strictPort &   # regenera src/app/routeTree.gen.ts
+   ```
+
+2. **Un `tauri dev` viejo revierte el árbol.** `virtualRouteConfig`
+   (`src/app/routes.ts`) se lee **una vez, al arrancar**: un dev server que
+   siga vivo de antes de tocar `routes.ts` reescribe `routeTree.gen.ts` con su
+   configuración antigua en cada pasada del watcher, borrando la ruta recién
+   generada. Se vio literalmente: el fichero volvía a su tamaño exacto anterior
+   segundos después de generarlo bien. **Antes de añadir rutas, comprobar que
+   no queda ninguno**: `pgrep -fl "vite|buzz-desktop"`.
