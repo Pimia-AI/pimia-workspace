@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Divergencia Pimia: el script usa `mapfile` y `declare -A`, ambos de bash 4+, y
+# macOS trae bash 3.2 — fallaba a mitad («mapfile: command not found», luego
+# «PARENT_ARGS[@]: unbound variable») después de haber creado ya blobs sueltos.
+# Mejor decirlo de entrada que fallar por la mitad.
+if [[ ${BASH_VERSINFO[0]:-0} -lt 4 ]]; then
+  echo "error: este script necesita bash 4+ (mapfile, declare -A) y aquí hay ${BASH_VERSION}." >&2
+  echo "       En macOS: brew install bash && /opt/homebrew/bin/bash $0 ..." >&2
+  exit 1
+fi
+
 if [[ $# -lt 2 ]]; then
   echo "Usage: $0 <pr-number> <png-dir> [comment-body-file]" >&2
   exit 1
@@ -17,7 +27,21 @@ fi
 
 GH_USER=$(gh api user --jq .login)
 BRANCH="agent-screenshots/${GH_USER}"
-REPO="block/buzz"
+
+# Divergencia Pimia: `REPO` estaba cableado a `block/buzz`. En el fork eso hacía
+# que el script empujara la rama de capturas y comentara en **upstream**, que es
+# justo lo que la doctrina del fork prohíbe. Se deriva de `origin`, que es el
+# único remoto con escritura.
+ORIGIN_URL=$(git remote get-url origin)
+REPO=$(printf '%s\n' "$ORIGIN_URL" | sed -E 's#^(https://github\.com/|git@github\.com:|ssh://git@github\.com/)##; s#\.git$##')
+if [[ "$REPO" == "block/buzz" ]]; then
+  echo "error: origin apunta a block/buzz; este script no debe escribir en upstream" >&2
+  exit 1
+fi
+if ! [[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+  echo "error: no se pudo derivar el repo de origin ('$ORIGIN_URL')" >&2
+  exit 1
+fi
 
 mapfile -t PNGS < <(find "$PNG_DIR" -maxdepth 1 -name "*.png" -type f | sort)
 if [[ ${#PNGS[@]} -eq 0 ]]; then

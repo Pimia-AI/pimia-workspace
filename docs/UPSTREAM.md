@@ -399,3 +399,18 @@ porque macOS bloquea esa lectura mientras enseña su aviso modal.
 Los comandos que tocan el llavero son ahora `async` y hacen el trabajo en
 `tauri::async_runtime::spawn_blocking`. Regla para lo que venga: **si toca el
 llavero, fuera del hilo principal**.
+
+### 2026-08-08 — `scripts/post-screenshots.sh`: apuntaba a upstream
+
+**El fallo importante**: el script tenía `REPO="block/buzz"` **cableado**, así que
+en el fork habría empujado la rama de capturas y comentado el PR **en upstream** —
+justo lo que la doctrina prohíbe. Ahora deriva el repo de `origin` (el único
+remoto con escritura) y **se niega a correr** si `origin` apunta a `block/buzz`.
+
+De paso, un guard de versión: el script usa `mapfile` y `declare -A`, ambos de
+bash 4+, y macOS trae bash 3.2. Fallaba a mitad de camino —después de haber
+creado blobs sueltos— con errores que no decían la causa. Ahora avisa de entrada
+y dice el remedio (`brew install bash`).
+
+Consecuencia práctica: **en este Mac las capturas de PR no se pueden publicar**
+hasta instalar un bash moderno.
