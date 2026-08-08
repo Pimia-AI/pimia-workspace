@@ -398,7 +398,8 @@ test("search shortcut opens search without disturbing the collapsed sidebar", as
 
   await expect(page.getByTestId("open-search")).toBeVisible();
 
-  const sidebarRoot = page.locator('[data-side="left"][data-state]');
+  // La barra de Buzz vive a la derecha desde la Fase 1 del fork.
+  const sidebarRoot = page.locator('[data-side="right"][data-state]');
   await expect(sidebarRoot).toHaveAttribute("data-state", "expanded");
 
   // Collapse the sidebar; its pinned-header search slides off-screen.

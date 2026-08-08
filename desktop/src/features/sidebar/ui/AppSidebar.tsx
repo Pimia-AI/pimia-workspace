@@ -139,11 +139,9 @@ type AppSidebarProps = {
   ) => void;
   onRemoveCommunity: (id: string) => Promise<LeaveCommunityResult | undefined>;
   onCreateAgent: () => void;
-  onSelectAgents: () => void;
-  onSelectProjects: () => void;
-  onSelectPulse: () => void;
-  onSelectWorkflows: () => void;
   onSelectHome: () => void;
+  /** Lado en el que se monta. En Pimia Workspace, la derecha. */
+  side?: "left" | "right";
   onSelectChannel: (channelId: string) => void;
   onOpenSearchResult: (hit: SearchHit) => void;
   /**
@@ -211,11 +209,8 @@ export function AppSidebar({
   onUpdateCommunity,
   onRemoveCommunity,
   onCreateAgent,
-  onSelectAgents,
-  onSelectProjects,
-  onSelectPulse,
-  onSelectWorkflows,
   onSelectHome,
+  side = "left",
   onSelectChannel,
   onOpenSearchResult,
   searchChannels,
@@ -548,9 +543,10 @@ export function AppSidebar({
 
   return (
     <Sidebar
-      className="!z-[100] !border-r-0"
+      className="!z-[100] !border-l-0 !border-r-0"
       collapsible="offcanvas"
       data-testid="app-sidebar"
+      side={side}
       onClick={(event) => {
         if (isSidebarBackgroundTarget(event.target)) {
           onBackgroundClick?.();
@@ -606,11 +602,7 @@ export function AppSidebar({
             >
               <AppSidebarPrimaryMenu
                 homeBadgeCount={homeBadgeCount}
-                onSelectAgents={onSelectAgents}
                 onSelectHome={onSelectHome}
-                onSelectProjects={onSelectProjects}
-                onSelectPulse={onSelectPulse}
-                onSelectWorkflows={onSelectWorkflows}
                 selectedView={selectedView}
               />
 

@@ -5,8 +5,6 @@ import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
 import { cn } from "@/shared/lib/cn";
 import { performSidebarDefaultHaptic } from "@/shared/lib/haptics";
-import { hasPrimaryShortcutModifier } from "@/shared/lib/platform";
-import { useIsMobile } from "@/shared/hooks/use-mobile";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Separator } from "@/shared/ui/separator";
@@ -17,268 +15,19 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/shared/ui/sheet";
-import { Skeleton } from "@/shared/ui/skeleton";
+// Divergencia Pimia: el provider y el estado por «scope» viven aparte para que
+// puedan montarse dos barras a la vez. Ver `sidebar-provider.tsx`.
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/shared/ui/tooltip";
-
-const SIDEBAR_COOKIE_NAME = "sidebar_state";
-const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
-const SIDEBAR_WIDTH_STORAGE_KEY = "buzz-sidebar-width";
-const SIDEBAR_WIDTH_DEFAULT = 300;
-const SIDEBAR_WIDTH_DEFAULT_HAPTIC_THRESHOLD = 2;
-const SIDEBAR_WIDTH_DEFAULT_SNAP_DISTANCE = 8;
-const SIDEBAR_WIDTH_DEFAULT_MAGNET_DISTANCE = 28;
-const SIDEBAR_WIDTH_MIN = 220;
-const SIDEBAR_WIDTH_MAX = 420;
-const SIDEBAR_WIDTH_MOBILE = "288px";
-const SIDEBAR_WIDTH_ICON = "48px";
-const SIDEBAR_KEYBOARD_SHORTCUT = "s";
-
-type SidebarContextProps = {
-  state: "expanded" | "collapsed";
-  open: boolean;
-  setOpen: (open: boolean) => void;
-  openMobile: boolean;
-  setOpenMobile: (open: boolean) => void;
-  isMobile: boolean;
-  isRailDisabled: boolean;
-  isResizing: boolean;
-  setIsResizing: (isResizing: boolean) => void;
-  sidebarWidth: number;
-  setSidebarWidth: (width: number | ((width: number) => number)) => void;
-  toggleSidebar: () => void;
-};
-
-const SidebarContext = React.createContext<SidebarContextProps | null>(null);
-
-function useSidebar() {
-  const context = React.useContext(SidebarContext);
-  if (!context) {
-    throw new Error("useSidebar must be used within a SidebarProvider.");
-  }
-
-  return context;
-}
-
-function useOptionalSidebar() {
-  return React.useContext(SidebarContext);
-}
-
-function clampSidebarWidth(width: number) {
-  return Math.min(
-    SIDEBAR_WIDTH_MAX,
-    Math.max(SIDEBAR_WIDTH_MIN, Math.round(width)),
-  );
-}
-
-function isSidebarWidthNearDefault(width: number) {
-  return (
-    Math.abs(width - SIDEBAR_WIDTH_DEFAULT) <=
-    SIDEBAR_WIDTH_DEFAULT_HAPTIC_THRESHOLD
-  );
-}
-
-function magnetizeSidebarWidth(width: number) {
-  const offset = width - SIDEBAR_WIDTH_DEFAULT;
-  const distance = Math.abs(offset);
-
-  if (distance <= SIDEBAR_WIDTH_DEFAULT_SNAP_DISTANCE) {
-    return SIDEBAR_WIDTH_DEFAULT;
-  }
-
-  if (distance >= SIDEBAR_WIDTH_DEFAULT_MAGNET_DISTANCE) {
-    return clampSidebarWidth(width);
-  }
-
-  // Ease out of the detent so 300px feels sticky without blocking resize.
-  const progress =
-    (distance - SIDEBAR_WIDTH_DEFAULT_SNAP_DISTANCE) /
-    (SIDEBAR_WIDTH_DEFAULT_MAGNET_DISTANCE -
-      SIDEBAR_WIDTH_DEFAULT_SNAP_DISTANCE);
-  const easedDistance =
-    SIDEBAR_WIDTH_DEFAULT_MAGNET_DISTANCE * progress * progress;
-
-  return clampSidebarWidth(
-    SIDEBAR_WIDTH_DEFAULT + Math.sign(offset) * easedDistance,
-  );
-}
-
-function hasReachedSidebarDefaultWidth(
-  previousWidth: number,
-  nextWidth: number,
-) {
-  return (
-    isSidebarWidthNearDefault(nextWidth) ||
-    (previousWidth < SIDEBAR_WIDTH_DEFAULT &&
-      nextWidth > SIDEBAR_WIDTH_DEFAULT) ||
-    (previousWidth > SIDEBAR_WIDTH_DEFAULT && nextWidth < SIDEBAR_WIDTH_DEFAULT)
-  );
-}
-
-function readSidebarWidth() {
-  if (typeof window === "undefined") {
-    return SIDEBAR_WIDTH_DEFAULT;
-  }
-
-  const storedWidth = Number.parseInt(
-    window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY) ?? "",
-    10,
-  );
-
-  return Number.isFinite(storedWidth)
-    ? clampSidebarWidth(storedWidth)
-    : SIDEBAR_WIDTH_DEFAULT;
-}
-
-const SidebarProvider = React.forwardRef<
-  HTMLDivElement,
-  React.ComponentProps<"div"> & {
-    defaultOpen?: boolean;
-    disableRail?: boolean;
-    open?: boolean;
-    onOpenChange?: (open: boolean) => void;
-  }
->(
-  (
-    {
-      defaultOpen = true,
-      disableRail = false,
-      open: openProp,
-      onOpenChange: setOpenProp,
-      className,
-      style,
-      children,
-      ...props
-    },
-    ref,
-  ) => {
-    const isMobile = useIsMobile();
-    const [openMobile, setOpenMobile] = React.useState(false);
-    const [isResizing, setIsResizing] = React.useState(false);
-    const [sidebarWidth, setSidebarWidthState] =
-      React.useState(readSidebarWidth);
-
-    const [_open, _setOpen] = React.useState(defaultOpen);
-    const open = openProp ?? _open;
-    const setOpen = React.useCallback(
-      (value: boolean | ((value: boolean) => boolean)) => {
-        const openState = typeof value === "function" ? value(open) : value;
-        if (setOpenProp) {
-          setOpenProp(openState);
-        } else {
-          _setOpen(openState);
-        }
-
-        // biome-ignore lint/suspicious/noDocumentCookie: shadcn persists the sidebar open state with a cookie.
-        document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`;
-      },
-      [setOpenProp, open],
-    );
-
-    const setSidebarWidth = React.useCallback(
-      (value: number | ((width: number) => number)) => {
-        setSidebarWidthState((currentWidth) => {
-          const nextWidth = clampSidebarWidth(
-            typeof value === "function" ? value(currentWidth) : value,
-          );
-
-          if (typeof window !== "undefined") {
-            window.localStorage.setItem(
-              SIDEBAR_WIDTH_STORAGE_KEY,
-              String(nextWidth),
-            );
-          }
-
-          return nextWidth;
-        });
-      },
-      [],
-    );
-
-    const toggleSidebar = React.useCallback(() => {
-      return isMobile
-        ? setOpenMobile((open) => !open)
-        : setOpen((open) => !open);
-    }, [isMobile, setOpen]);
-
-    React.useEffect(() => {
-      const handleKeyDown = (event: KeyboardEvent) => {
-        if (
-          event.key === SIDEBAR_KEYBOARD_SHORTCUT &&
-          hasPrimaryShortcutModifier(event)
-        ) {
-          event.preventDefault();
-          toggleSidebar();
-        }
-      };
-
-      window.addEventListener("keydown", handleKeyDown);
-      return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [toggleSidebar]);
-
-    // We add a state so that we can do data-state="expanded" or "collapsed".
-    // This makes it easier to style the sidebar with Tailwind classes.
-    const state = open ? "expanded" : "collapsed";
-
-    const contextValue = React.useMemo<SidebarContextProps>(
-      () => ({
-        state,
-        open,
-        setOpen,
-        isMobile,
-        isRailDisabled: disableRail,
-        isResizing,
-        setIsResizing,
-        sidebarWidth,
-        setSidebarWidth,
-        openMobile,
-        setOpenMobile,
-        toggleSidebar,
-      }),
-      [
-        state,
-        open,
-        setOpen,
-        isMobile,
-        disableRail,
-        isResizing,
-        sidebarWidth,
-        setSidebarWidth,
-        openMobile,
-        toggleSidebar,
-      ],
-    );
-
-    return (
-      <SidebarContext.Provider value={contextValue}>
-        <TooltipProvider delayDuration={0}>
-          <div
-            style={
-              {
-                "--sidebar-width": `${sidebarWidth}px`,
-                "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
-                ...style,
-              } as React.CSSProperties
-            }
-            className={cn(
-              "group/sidebar-wrapper flex h-full min-h-0 w-full has-[[data-variant=inset]]:bg-sidebar",
-              className,
-            )}
-            ref={ref}
-            {...props}
-          >
-            {children}
-          </div>
-        </TooltipProvider>
-      </SidebarContext.Provider>
-    );
-  },
-);
-SidebarProvider.displayName = "SidebarProvider";
+  hasReachedSidebarDefaultWidth,
+  isSidebarWidthNearDefault,
+  magnetizeSidebarWidth,
+  SIDEBAR_WIDTH_MOBILE,
+  SidebarProvider,
+  useOptionalSidebar,
+  useSidebar,
+} from "@/shared/ui/sidebar-provider";
+import { Skeleton } from "@/shared/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 
 const Sidebar = React.forwardRef<
   HTMLDivElement,
@@ -379,7 +128,10 @@ const Sidebar = React.forwardRef<
         >
           <div
             data-sidebar="sidebar"
-            className="flex h-full w-full flex-col bg-sidebar group-data-[variant=sidebar]:pr-px group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow"
+            // La hairline de 1px va del lado que toca: a la derecha cuando la
+            // barra está a la izquierda y al revés (divergencia Pimia — antes
+            // solo existía el caso izquierdo).
+            className="flex h-full w-full flex-col bg-sidebar group-data-[side=left]:group-data-[variant=sidebar]:pr-px group-data-[side=right]:group-data-[variant=sidebar]:pl-px group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border group-data-[variant=floating]:shadow"
           >
             {children}
           </div>
@@ -435,6 +187,7 @@ const SidebarRail = React.forwardRef<
       setIsResizing,
       setSidebarWidth,
       isRailDisabled,
+      scope,
       sidebarWidth,
       state,
     } = useSidebar();
@@ -497,7 +250,10 @@ const SidebarRail = React.forwardRef<
           resizeStateRef.current = {
             currentWidth: sidebarWidth,
             hasDragged: false,
-            hasReachedDefaultWidth: isSidebarWidthNearDefault(sidebarWidth),
+            hasReachedDefaultWidth: isSidebarWidthNearDefault(
+              sidebarWidth,
+              scope,
+            ),
             pointerId: event.pointerId,
             previousCursor: document.documentElement.style.cursor,
             previousUserSelect: document.body.style.userSelect,
@@ -527,10 +283,12 @@ const SidebarRail = React.forwardRef<
           event.preventDefault();
           const nextWidth = magnetizeSidebarWidth(
             resizeState.startWidth + delta,
+            scope,
           );
           const reachedDefaultWidth = hasReachedSidebarDefaultWidth(
             resizeState.currentWidth,
             nextWidth,
+            scope,
           );
 
           if (reachedDefaultWidth && !resizeState.hasReachedDefaultWidth) {
@@ -1008,3 +766,5 @@ export {
   useSidebar,
   useOptionalSidebar,
 };
+export type { SidebarScope } from "@/shared/ui/sidebar-provider";
+export { DEFAULT_SIDEBAR_SCOPE } from "@/shared/ui/sidebar-provider";

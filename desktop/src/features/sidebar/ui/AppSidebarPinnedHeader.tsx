@@ -1,4 +1,4 @@
-import { Activity, Bot, FolderGit2, Inbox, Receipt, Zap } from "lucide-react";
+import { Activity, Bot, FolderGit2, Inbox, Zap } from "lucide-react";
 
 import type { AppView } from "@/app/AppShell.helpers";
 import { useAppNavigation } from "@/app/navigation/useAppNavigation";
@@ -33,11 +33,7 @@ type AppSidebarPinnedHeaderProps = {
 
 type AppSidebarPrimaryMenuProps = {
   homeBadgeCount: number;
-  onSelectAgents: () => void;
   onSelectHome: () => void;
-  onSelectProjects: () => void;
-  onSelectPulse: () => void;
-  onSelectWorkflows: () => void;
   selectedView: SidebarSelectedView;
 };
 
@@ -78,18 +74,16 @@ export function AppSidebarPinnedHeader({
 
 export function AppSidebarPrimaryMenu({
   homeBadgeCount,
-  onSelectAgents,
   onSelectHome,
-  onSelectProjects,
-  onSelectPulse,
-  onSelectWorkflows,
   selectedView,
 }: AppSidebarPrimaryMenuProps) {
-  // Divergencia Pimia: las secciones propias navegan desde aquí en vez de
-  // recibir un `onSelectX` cableado en `AppShell`. Es el patrón que ya usa
+  // Divergencia Pimia: el menú navega desde aquí en vez de recibir un
+  // `onSelectX` cableado en `AppShell`. Es el patrón que ya usa
   // `ChannelActivityPopover`, y evita que cada sección nueva engorde
   // `AppShell.tsx` y `AppSidebar.tsx`, que están en el techo del ratchet.
-  const { goPimia } = useAppNavigation();
+  // `onSelectHome` sí sigue viniendo del shell: `AppSidebar` lo usa además
+  // para volver a la bandeja al ocultar el canal activo.
+  const { goAgents, goProjects, goPulse, goWorkflows } = useAppNavigation();
 
   return (
     <SidebarHeader
@@ -126,26 +120,12 @@ export function AppSidebarPrimaryMenu({
             </SidebarMenuBadge>
           ) : null}
         </SidebarMenuItem>
-        <FeatureGate feature="pimia">
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              data-testid="open-pimia-view"
-              isActive={selectedView === "pimia"}
-              onClick={() => void goPimia()}
-              tooltip="Pimia"
-              type="button"
-            >
-              <Receipt className="h-4 w-4" />
-              <SidebarMenuLabel>Pimia</SidebarMenuLabel>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </FeatureGate>
         <FeatureGate feature="pulse">
           <SidebarMenuItem>
             <SidebarMenuButton
               data-testid="open-pulse-view"
               isActive={selectedView === "pulse"}
-              onClick={onSelectPulse}
+              onClick={() => void goPulse()}
               tooltip="Pulse"
               type="button"
             >
@@ -159,7 +139,7 @@ export function AppSidebarPrimaryMenu({
             <SidebarMenuButton
               data-testid="open-projects-view"
               isActive={selectedView === "projects"}
-              onClick={onSelectProjects}
+              onClick={() => void goProjects()}
               tooltip="Projects"
               type="button"
             >
@@ -173,7 +153,7 @@ export function AppSidebarPrimaryMenu({
             className="data-[active=true]:font-normal"
             data-testid="open-agents-view"
             isActive={selectedView === "agents"}
-            onClick={onSelectAgents}
+            onClick={() => void goAgents()}
             tooltip="Agents"
             type="button"
           >
@@ -194,7 +174,7 @@ export function AppSidebarPrimaryMenu({
             <SidebarMenuButton
               data-testid="open-workflows-view"
               isActive={selectedView === "workflows"}
-              onClick={onSelectWorkflows}
+              onClick={() => void goWorkflows()}
               tooltip="Workflows"
               type="button"
             >

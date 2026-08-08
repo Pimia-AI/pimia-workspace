@@ -987,9 +987,18 @@ test.describe("community rail", () => {
       ((buttonBox?.x ?? 0) + (buttonBox?.width ?? 0));
     expect(Math.abs(leftInset - 10)).toBeLessThan(0.5);
     expect(Math.abs(leftInset - rightInset)).toBeLessThan(0.5);
-    const visibleRightGap =
-      (searchBox?.x ?? 0) - ((buttonBox?.x ?? 0) + (buttonBox?.width ?? 0));
-    expect(Math.abs(leftInset - visibleRightGap)).toBeLessThan(0.5);
+    // Hasta la Fase 1 el rail quedaba pegado a la búsqueda de la barra de Buzz
+    // y se comprobaba que el hueco entre ambos igualaba el inset del rail. Esa
+    // barra se fue a la derecha, así que la búsqueda ya no es su vecina: lo que
+    // queda a comprobar es que el rail no se solapa con el contenido.
+    //
+    // ⚠️ Cuestión de diseño abierta (👤): el rail es el conmutador de
+    // comunidades de Buzz y hoy sigue en el extremo izquierdo, junto a la barra
+    // del ERP. Lo coherente con la disposición nueva sería moverlo a la derecha,
+    // por fuera de la barra de Buzz — decisión del fundador, no se toca aquí.
+    expect(searchBox?.x ?? 0).toBeGreaterThan(
+      (buttonBox?.x ?? 0) + (buttonBox?.width ?? 0),
+    );
 
     // With the rail visible, the top-chrome controls (sidebar toggle, back/
     // forward) sit just past the traffic lights near the rail edge — not

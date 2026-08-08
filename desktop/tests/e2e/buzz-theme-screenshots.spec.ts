@@ -141,10 +141,9 @@ async function expectBuzzSidebarPalette(page: Page, mode: "light" | "dark") {
     "color",
     mutedColor,
   );
-  await expect(page.locator('[data-sidebar="trigger"]')).toHaveCSS(
-    "color",
-    chromeColor,
-  );
+  await expect(
+    page.locator('[data-testid="app-top-chrome"] [data-sidebar="trigger"]'),
+  ).toHaveCSS("color", chromeColor);
   await expect(page.getByTestId("global-back")).toHaveCSS("color", chromeColor);
   await expect(page.getByTestId("global-forward")).toHaveCSS(
     "color",

@@ -2,8 +2,8 @@ import * as React from "react";
 import {
   ChevronLeft,
   ChevronRight,
-  PanelLeftClose,
-  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
 } from "lucide-react";
 
 import { isMacPlatform } from "@/shared/lib/platform";
@@ -34,6 +34,13 @@ function preventTopChromeWheel(event: WheelEvent) {
   event.preventDefault();
 }
 
+/**
+ * Alterna la barra de Buzz. Divergencia Pimia: esa barra vive ahora a la
+ * derecha, así que el botón se fue al extremo derecho del chrome y usa los
+ * iconos de panel derecho. El `aria-label` no cambia — es el mismo control y
+ * los e2e lo buscan por ese nombre. La barra izquierda (el ERP) no necesita
+ * botón aquí: colapsa a iconos y trae el suyo en su cabecera.
+ */
 function TopChromeSidebarTrigger() {
   const sidebar = useOptionalSidebar();
 
@@ -50,7 +57,7 @@ function TopChromeSidebarTrigger() {
       type="button"
       variant="ghost"
     >
-      {sidebar?.open ? <PanelLeftClose /> : <PanelLeftOpen />}
+      {sidebar?.open ? <PanelRightClose /> : <PanelRightOpen />}
       <span className="sr-only">Toggle Sidebar</span>
     </Button>
   );
@@ -107,7 +114,6 @@ export function AppTopChrome({
       data-testid="app-top-chrome"
     >
       <div className={cn("flex items-center gap-0.5", navRowAlignmentClass)}>
-        <TopChromeSidebarTrigger />
         <Button
           aria-label="Go back"
           className={HISTORY_ICON_BUTTON_CLASS}
@@ -130,6 +136,14 @@ export function AppTopChrome({
         >
           <ChevronRight />
         </Button>
+      </div>
+      <div
+        className={cn(
+          "ml-auto flex items-center gap-0.5",
+          navRowAlignmentClass,
+        )}
+      >
+        <TopChromeSidebarTrigger />
       </div>
     </div>
   );
