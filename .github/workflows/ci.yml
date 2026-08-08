@@ -966,7 +966,16 @@ jobs:
     # cold across four steps; budget generously.
     timeout-minutes: 45
     needs: [changes]
-    if: github.event_name == 'push' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.desktop-rust == 'true'
+    # Pimia divergence: `main`/`release` only — skipped on pull requests.
+    # This repo is private on a Free plan, where included Actions minutes are
+    # metered with a per-OS multiplier: Windows bills 2x and macOS 10x, so a
+    # single desktop-heavy PR could consume the whole monthly allowance while
+    # Linux bills 1x. Pull requests keep the equivalent Rust gate on Linux
+    # (`Rust Lint` + `Desktop Core`, which run clippy/check/test on the
+    # workspace and the Tauri crate); what moves to merge time is MSVC-specific
+    # compilation — `#[cfg(windows)]` code and the `windows-sys`/`keyring`
+    # Windows backends. See docs/UPSTREAM.md.
+    if: github.event_name == 'push'
     permissions:
       contents: read
     env:
@@ -1049,7 +1058,15 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 45
     needs: [changes]
-    if: github.event_name == 'push' || needs.changes.outputs.desktop == 'true' || needs.changes.outputs.desktop-rust == 'true' || needs.changes.outputs.rust == 'true'
+    # Pimia divergence: `main`/`release` only — skipped on pull requests, and
+    # the costliest of the two (macOS bills 10x the included minutes, so a
+    # 20-minute build charges ~200). Rationale and PR-time coverage are
+    # explained on the `windows-rust` gate above; the macOS-specific gap is
+    # `#[cfg(target_os = "macos")]` code — Keychain/`security-framework`
+    # access, notifications, the WebKit paths — which now compiles at merge
+    # time. Signed release builds are unaffected: they run from `release.yml`
+    # on `desktop-v*` tags. See docs/UPSTREAM.md.
+    if: github.event_name == 'push'
     permissions:
       contents: read
     steps:

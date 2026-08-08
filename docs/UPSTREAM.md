@@ -681,3 +681,69 @@ a la mitad de un valor. El único camino fiel es `-w <valor>` por argumento.
 Cualquier script que toque el blob debe releer y comparar byte a byte después de
 escribir, con copia previa: `security` reemplaza la entrada **entera**, así que
 una escritura a medias se lleva identidad y claves de agentes por delante.
+
+### 2026-08-08 — macOS y Windows salen de los PRs (coste de Actions)
+
+**El disparador**: la CI del PR #4 no arrancó. La anotación de GitHub —*«recent
+account payments have failed or your spending limit needs to be increased»*— no
+dice lo importante, que es **por qué** se agotó la cuota.
+
+`Pimia-AI` está en plan `free` y este repo es **privado**, así que los minutos de
+Actions se miden. Y no se cuentan 1:1: se cobran con **multiplicador por sistema
+operativo**, que es el dato que convierte «2000 minutos al mes» en algo mucho
+más pequeño.
+
+| Runner | Multiplicador | Con 2000 incluidos |
+|---|---|---|
+| Linux | 1× | 2000 min |
+| Windows | 2× | 1000 min |
+| **macOS** | **10×** | **200 min** |
+
+Un build de Tauri para macOS no baja de 15–20 minutos: **150–200 minutos
+cobrados por ejecución**. Es decir, un solo PR con el build de escritorio se
+podía llevar el mes entero. En repos públicos los runners estándar son gratis e
+ilimitados; por eso `block/buzz` no paga esto y nosotros sí. Misma CI, distinta
+visibilidad.
+
+**La divergencia**: en `ci.yml`, los dos únicos jobs que no son de Linux pasan a
+correr **solo en `push` a `main`/`release`** y se saltan en los pull requests.
+
+```yaml
+  windows-rust:        # antes: push || rust || desktop-rust
+  desktop-build-macos: # antes: push || desktop || desktop-rust || rust
+    if: github.event_name == 'push'
+```
+
+Se cambió la condición del job, **no el disparador del workflow**: así el check
+se sigue creando y se reporta como `skipped`, que las protecciones de rama
+tratan como aprobado. Quitar el trigger lo dejaría `pending` para siempre. (Hoy
+da igual —el plan Free no ofrece protección de rama en privados— pero el día que
+se contrate, esto ya está bien hecho.)
+
+**Qué NO se toca, y por qué no hacía falta:**
+
+- Los **cuatro canarios** (`macos-intel-canary`, `signed-macos-canary`,
+  `windows-canary`, `linux-canary`) y `desktop-release-cache-proof` ya eran
+  `workflow_dispatch`: nunca corrían solos.
+- **`release.yml`** solo va por tags `desktop-v[0-9]*`. Los builds firmados de
+  release siguen exactamente igual — ahí es donde vive el «y tags».
+- **`docker.yml`** usa `${{ matrix.runner }}`, y toda su matriz es Linux
+  (`ubuntu-24.04` / `ubuntu-24.04-arm`).
+- **`desktop-release-candidate.yml`** corre en PRs, pero en `ubuntu-latest`.
+- Los **14 jobs de Linux** conservan sus filtros por ruta intactos.
+
+**Qué cobertura pierde un PR, dicho sin adornos.** Poca de Rust y algo de
+plataforma:
+
+- `Desktop Core` (ubuntu) ya corre `desktop-tauri-clippy`, `desktop-tauri-check`,
+  `desktop-tauri-test` y `desktop-tauri-test-compiled-flags`, así que la crate de
+  Tauri **no** se queda sin clippy ni sin tests.
+- Lo que se mueve al *merge* es la compilación **específica de plataforma**: el
+  código bajo `#[cfg(target_os = "macos")]` (Keychain y `security-framework`,
+  notificaciones, rutas de WebKit) y bajo `#[cfg(windows)]` (`windows-sys`, el
+  backend de `keyring` en Windows). Un PR que toque `secret_store.rs` ya no ve
+  ese compilado hasta que entra en `main`.
+
+Si eso molesta en un PR concreto, la salida sin coste fijo es una escotilla —
+`workflow_dispatch` o una etiqueta tipo `ci:full` en la condición del job— para
+pedirlos a demanda. No se ha puesto todavía: primero conviene ver cuánto duele.
