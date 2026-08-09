@@ -62,14 +62,85 @@ test("la acción primaria de un aceptado es convertir en factura", async ({
   await shoot(page, "ficha-aceptado");
 });
 
-test("la de un borrador es marcarlo como enviado", async ({ page }) => {
+test("la de un borrador es enviarlo", async ({ page }) => {
   await boot(page);
   await openEstimate(page, "133");
 
   await expect(page.getByTestId("pimia-estimate-primary-action")).toHaveText(
-    /Marcar como enviado/,
+    /Enviar/,
   );
   await shoot(page, "ficha-borrador");
+});
+
+test("enviar enseña a quién, con qué asunto y con qué texto", async ({
+  page,
+}) => {
+  await boot(page);
+  await openEstimate(page, "133");
+  await page.getByTestId("pimia-estimate-primary-action").click();
+
+  const dialog = page.getByTestId("pimia-estimate-send-dialog");
+  await expect(dialog).toBeVisible();
+  // El destinatario sale de la ficha del cliente, no hay que buscarlo.
+  await expect(page.locator("#pimia-send-to")).toHaveValue(
+    "administracion@penalba.es",
+  );
+  await expect(page.locator("#pimia-send-subject")).toHaveValue(
+    "Presupuesto PRE-000133",
+  );
+  // El cuerpo llega con la plantilla de la empresa, marcadores incluidos.
+  await expect(page.locator("#pimia-send-body")).toHaveValue(
+    /\{COMPANY_NAME\}/,
+  );
+  await expect(page.getByTestId("pimia-estimate-send-warning")).toContainText(
+    "no se puede deshacer",
+  );
+  // El remitente NO es un campo: lo pone el ERP.
+  await expect(dialog.getByText("El remitente lo pone Pimia")).toBeVisible();
+  await shoot(page, "enviar-dialogo");
+});
+
+test("enviar deja el presupuesto en enviado", async ({ page }) => {
+  await boot(page);
+  await openEstimate(page, "133");
+  await page.getByTestId("pimia-estimate-primary-action").click();
+  await page.getByTestId("pimia-estimate-send-confirm").click();
+
+  await expect(page.getByText("PRE-000133 enviado a")).toBeVisible();
+  // El servidor pasa el borrador a SENT al encolar el correo; si la pantalla no
+  // releyera, la insignia seguiría diciendo «Borrador».
+  await expect(page.getByText("Enviado", { exact: true })).toBeVisible();
+  await shoot(page, "enviado");
+});
+
+test("sin destinatario no deja mandar", async ({ page }) => {
+  await boot(page);
+  await openEstimate(page, "133");
+  await page.getByTestId("pimia-estimate-primary-action").click();
+
+  await page.locator("#pimia-send-to").fill("");
+  await expect(page.getByTestId("pimia-estimate-send-confirm")).toBeDisabled();
+
+  // Y una dirección a medias tampoco cuenta como destinatario.
+  await page.locator("#pimia-send-to").fill("marta@");
+  await expect(page.getByTestId("pimia-estimate-send-confirm")).toBeDisabled();
+
+  await page.locator("#pimia-send-to").fill("marta@ejemplo.es");
+  await expect(page.getByTestId("pimia-estimate-send-confirm")).toBeEnabled();
+});
+
+test("un enviado ofrece reenviar, no enviar", async ({ page }) => {
+  await boot(page);
+  await openEstimate(page, "132");
+  await page.getByTestId("pimia-estimate-actions-132").click();
+
+  await page.getByRole("menuitem", { name: "Reenviar" }).click();
+
+  // El diálogo se titula con el mismo verbo del que se llegó: un menú que dice
+  // «Reenviar» abriendo un «Enviar» hace dudar de si se está repitiendo algo.
+  await expect(page.getByTestId("pimia-estimate-send-dialog")).toContainText(
+    "Reenviar PRE-000132",
+  );
 });
 
 test("el menú de la ficha ofrece todas las acciones", async ({ page }) => {
@@ -168,9 +239,10 @@ test("duplicar pregunta antes y lleva al duplicado", async ({ page }) => {
 
   await page.getByRole("button", { name: "Duplicar", exact: true }).click();
   // El duplicado es otro documento: la ficha tiene que ser la suya, no la del
-  // original que se acaba de copiar.
+  // original que se acaba de copiar. Y nace en borrador, así que su acción
+  // primaria es enviarlo —no duplicar otra vez, que es la del rechazado.
   await expect(page.getByTestId("pimia-estimate-primary-action")).toHaveText(
-    /Marcar como enviado/,
+    /Enviar/,
   );
   await shoot(page, "duplicado");
 });

@@ -498,7 +498,7 @@ export async function installPimiaMock(
        */
       const act = (clean: string) => {
         const match =
-          /^\/estimates\/([^/]+)\/(status|clone|convert-to-invoice)$/.exec(
+          /^\/estimates\/([^/]+)\/(status|clone|convert-to-invoice|send)$/.exec(
             clean,
           );
         if (!match) {
@@ -532,6 +532,30 @@ export async function installPimiaMock(
             if (action === "status") {
               estimate.status = String(body.status ?? estimate.status);
               return { success: true };
+            }
+
+            if (action === "send") {
+              // Como el servidor: valida lo que exige `SendDocumentMailRequest`
+              // —y **`from` no está**, porque lo pone la instancia y el que
+              // mande un cliente se ignora (factSaas #314/#315)—, pasa el
+              // borrador a SENT y ENCOLA el correo. El 200 significa «aceptado
+              // para enviar», no «entregado».
+              const faltan = ["subject", "body", "to"].filter(
+                (campo) => String(body[campo] ?? "").trim() === "",
+              );
+              if (faltan.length > 0) {
+                return {
+                  __reject: {
+                    kind: "validation",
+                    status: 422,
+                    message: `The ${faltan[0]} field is required.`,
+                  },
+                };
+              }
+              if (estimate.status === "DRAFT") {
+                estimate.status = "SENT";
+              }
+              return { success: true, type: "send" };
             }
 
             if (action === "clone") {
@@ -693,6 +717,21 @@ export async function installPimiaMock(
 
         if (clean === "/next-number") {
           return { next_number: "PRE-000134" };
+        }
+
+        if (clean === "/bootstrap") {
+          // Recortado, pero con la forma real: la plantilla de correo vive en
+          // `current_company_settings`, es **HTML** y lleva marcadores que
+          // sustituye el servidor al enviar. Se pide por aquí y no por
+          // `/company/settings` porque aquello exige `settings:read`, que no
+          // existe en el catálogo OAuth.
+          return {
+            current_company_settings: {
+              estimate_mail_body:
+                "Has recibido un presupuesto de <b>{COMPANY_NAME}</b>.</br> Puedes descargarlo con el botón de abajo:",
+              estimate_auto_generate: "YES",
+            },
+          };
         }
 
         return { data: [] };

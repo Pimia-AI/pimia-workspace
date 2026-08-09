@@ -12,17 +12,14 @@
  * - **Cambiar de estado** no pregunta: se deshace desde el mismo menú.
  * - **Duplicar** y **convertir a factura** crean un documento nuevo, y a este
  *   módulo no se le puede pedir que lo borre. Preguntan.
+ * - **Enviar** sale de la app hacia una persona real: no pregunta «¿seguro?»,
+ *   abre un diálogo donde se ve **qué** se manda y **a quién**
+ *   (`PimiaEstimateSendDialog`).
  * - **El PDF** solo abre el navegador.
  *
- * ⛔ **Enviar no está**, y no es un olvido: `POST /estimates/{id}/send` exige un
- * remitente (`from`) que es el remitente de verdad del correo, y leerlo
- * (`GET /company/mail/config`) cae en el dominio `settings` del guard de la
- * API — que **no está en el catálogo OAuth** (`config/oauth.php` de factSaas).
- * O sea que ningún grant pedible puede leerlo, e inventárselo mandaría el
- * correo desde una dirección que el SMTP del tenant quizá no autoriza: fallo
- * silencioso en el worker con un «enviado» en pantalla. El arreglo está del
- * lado del ERP —hacer `from` opcional y que lo rellene `TenantMailSettings`—,
- * no aquí. Ver `docs/PIMIA-UI.md § Las acciones de documento`.
+ * «Marcar como enviado» se queda **además** de enviar, y no sobra: la mayoría
+ * de los presupuestos salen por WhatsApp o en mano, y registrar eso no es lo
+ * mismo que mandar un correo.
  */
 
 import * as React from "react";
@@ -51,6 +48,7 @@ import {
   useConvertPimiaEstimateToInvoice,
 } from "@/features/pimia/hooks/usePimiaResources";
 import { PimiaConnectDialog } from "@/features/pimia/ui/PimiaConnectDialog";
+import { PimiaEstimateSendDialog } from "@/features/pimia/ui/PimiaEstimateSendDialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -123,10 +121,12 @@ function errorMessage(error: unknown, fallback: string) {
  */
 function primaryActionFor(
   status: string,
-): PimiaEstimateManualStatus | "convert" | "clone" | null {
+): PimiaEstimateManualStatus | "send" | "convert" | "clone" | null {
   switch (status) {
+    // Un borrador todavía no ha salido, así que lo que toca es mandarlo. El
+    // «marcar como enviado» sigue en el menú para el que lo mandó por fuera.
     case "DRAFT":
-      return "SENT";
+      return "send";
     case "SENT":
     case "VIEWED":
       return "ACCEPTED";
@@ -163,6 +163,7 @@ export function PimiaEstimateActions({
     null,
   );
   const [isReconnectOpen, setIsReconnectOpen] = React.useState(false);
+  const [isSendOpen, setIsSendOpen] = React.useState(false);
 
   const changeStatus = useChangePimiaEstimateStatus();
   const clone = useClonePimiaEstimate();
@@ -260,7 +261,9 @@ export function PimiaEstimateActions({
           data-testid="pimia-estimate-primary-action"
           disabled={isBusy}
           onClick={() => {
-            if (primary === "convert") {
+            if (primary === "send") {
+              setIsSendOpen(true);
+            } else if (primary === "convert") {
               requestConvert();
             } else if (primary === "clone") {
               setConfirmation("clone");
@@ -270,7 +273,12 @@ export function PimiaEstimateActions({
           }}
         >
           {isBusy ? <Spinner className="h-3.5 w-3.5" /> : null}
-          {primary === "convert" ? (
+          {primary === "send" ? (
+            <>
+              <Send className="h-4 w-4" />
+              Enviar
+            </>
+          ) : primary === "convert" ? (
             <>
               <Receipt className="h-4 w-4" />
               Convertir en factura
@@ -309,6 +317,15 @@ export function PimiaEstimateActions({
         <DropdownMenuContent align="end" className="w-60">
           {navigationItems}
           {navigationItems ? <DropdownMenuSeparator /> : null}
+
+          {/* Siempre disponible: mandar un presupuesto nunca es inválido para
+              el servidor, y el estado solo cambia cómo se llama la acción. */}
+          <DropdownMenuItem onSelect={() => setIsSendOpen(true)}>
+            <Send className="h-4 w-4" />
+            {estimate.status === "DRAFT" ? "Enviar por correo" : "Reenviar"}
+          </DropdownMenuItem>
+
+          <DropdownMenuSeparator />
 
           {statuses.map((status) => (
             <DropdownMenuItem
@@ -432,6 +449,17 @@ export function PimiaEstimateActions({
       <PimiaConnectDialog
         onOpenChange={setIsReconnectOpen}
         open={isReconnectOpen}
+      />
+
+      <PimiaEstimateSendDialog
+        estimate={estimate}
+        onOpenChange={setIsSendOpen}
+        onSent={(to) => {
+          // El servidor ENCOLA el correo, así que lo honesto es decir que se
+          // mandó, no que llegó.
+          toast.success(`${estimate.estimateNumber} enviado a ${to}`);
+        }}
+        open={isSendOpen}
       />
     </>
   );

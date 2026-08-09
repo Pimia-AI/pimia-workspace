@@ -13,6 +13,7 @@ import {
   listCustomers,
   type ListCustomersInput,
 } from "@/features/pimia/api/customers";
+import { fetchEstimateMailBody } from "@/features/pimia/api/company";
 import {
   changeEstimateStatus,
   cloneEstimate,
@@ -20,8 +21,10 @@ import {
   createEstimate,
   getEstimate,
   listEstimates,
+  sendEstimate,
   type ListEstimatesInput,
   type PimiaEstimateDraft,
+  type PimiaEstimateMail,
   type PimiaEstimateManualStatus,
 } from "@/features/pimia/api/estimates";
 import { useActivePimiaTenant } from "@/features/pimia/hooks/usePimiaAuth";
@@ -123,6 +126,36 @@ export function useClonePimiaEstimate() {
 
   return useMutation({
     mutationFn: (estimateId: string) => cloneEstimate(estimateId),
+    onSuccess: invalidate,
+  });
+}
+
+/**
+ * La plantilla de correo de la empresa, para prellenar el envío.
+ *
+ * Cuelga de `["pimia","data",<tenant>]` como todo lo demás, pero con
+ * `staleTime` largo: sale de `/bootstrap`, que devuelve el mundo entero, y un
+ * ajuste de empresa no cambia mientras alguien redacta un correo.
+ */
+export function usePimiaEstimateMailBodyQuery(enabled: boolean) {
+  const tenant = useActivePimiaTenant();
+
+  return useQuery({
+    queryKey: dataKey(tenant?.id, "estimateMailBody"),
+    queryFn: () => fetchEstimateMailBody(),
+    enabled: Boolean(tenant) && enabled,
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
+export function useSendPimiaEstimate() {
+  const invalidate = useInvalidateTenantData();
+
+  return useMutation({
+    mutationFn: (input: { estimateId: string; mail: PimiaEstimateMail }) =>
+      sendEstimate(input.estimateId, input.mail),
+    // Enviar mueve el estado del borrador a «enviado», así que la ficha y la
+    // lista tienen que releerse igual que con un cambio de estado a mano.
     onSuccess: invalidate,
   });
 }
