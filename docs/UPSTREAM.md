@@ -777,3 +777,51 @@ o **200 de macOS**. Si algún día se vuelve a privado, el recorte está en el
 historial de esta rama listo para reaplicar; y la escotilla a demanda
 (`workflow_dispatch` o etiqueta `ci:full`) sigue siendo la forma correcta de no
 perder la cobertura de plataforma al hacerlo.
+
+### 2026-08-09 — Windows sale del ciclo de CI (macOS es el único objetivo)
+
+👤 «de momento nos olvidamos de windows, primero construimos para mac que es lo
+que tenemos ahora mismo».
+
+El job `windows-rust` de `ci.yml` queda tras una variable de repositorio. **No se
+borra**: compila el workspace y la crate de Tauri con MSVC, y el día que haya
+build de Windows hace falta tal cual.
+
+```yaml
+if: >-
+  vars.CI_WINDOWS == 'true' && (github.event_name == 'push' || …)
+```
+
+Se reactiva sin tocar código:
+
+```bash
+gh variable set CI_WINDOWS --repo Pimia-AI/pimia-workspace --body true
+```
+
+**Qué se pierde**: la compilación MSVC, o sea el código bajo `#[cfg(windows)]` y
+los backends de `windows-sys`/`keyring` para Windows. Nadie más lo cubre — ni
+`Rust Lint` ni `Desktop Core`, que son de Linux.
+
+**Qué NO se gana, medido para que no se busque donde no está**: tiempo de reloj.
+
+| Job | Duración (frío) |
+|---|---|
+| `Desktop Core` | ≥16 min |
+| `Desktop Smoke E2E` (×4 shards) | 12-15 min |
+| **`Windows Rust`** | **7m 47s** |
+| `Desktop E2E Integration` | 7 min |
+| `Desktop Build (macOS)` | 5 min |
+| `Rust Lint` | 3 min |
+
+Los jobs corren en paralelo, así que la espera la fija `Desktop Core`, no
+Windows; y en un repo público los minutos son gratis. Lo que se gana es
+**quietud**: se acaba el rojo intermitente de `sherpa-onnx-sys`, que se descarga
+un binario precompilado al compilar y falla cuando el servidor corta la conexión
+(`os error 10054`).
+
+**Dónde está el tiempo de verdad**, por si se busca ahí: en la caché de Rust, que
+no existe. `ci.yml` la guarda con `save-if: github.event_name != 'pull_request'`
+—o sea, solo un push a `main`— y `main` acumula siete runs, todos fallidos antes
+de compilar nada por el bloqueo de facturación. Cada job de PR compila ~900
+dependencias desde cero. El primer merge a `main` que llegue al final puebla la
+caché y esos 4-16 minutos por job caen a menos de uno.
