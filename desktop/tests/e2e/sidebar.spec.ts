@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { installMockBridge } from "../helpers/bridge";
 import { openSettings } from "../helpers/settings";
+import { dragSidebarRail } from "../helpers/sidebar";
 
 const SIDEBAR_WIDTH_STORAGE_KEY = "buzz-sidebar-width";
 const COMMUNITY_ONBOARDING_STORAGE_KEY =
@@ -55,32 +56,9 @@ async function expectAppClickable(page: Page) {
   await expect(page.getByTestId("chat-title")).toHaveText("general");
 }
 
-async function dragSidebarRail(page: Page, deltaX: number) {
-  // Divergencia Pimia: el shell monta DOS barras con rail propio (la del ERP a
-  // la izquierda y la de Buzz a la derecha), así que un `[data-sidebar="rail"]`
-  // a secas resuelve a dos elementos y Playwright aborta por modo estricto.
-  // Se acota a la barra de Buzz, que es la que estos tests conducen; el rail es
-  // descendiente del nodo que lleva el `data-testid`.
-  const sidebarRail = page
-    .getByTestId("app-sidebar")
-    .locator('[data-sidebar="rail"]');
-  await expect(sidebarRail).toBeVisible();
-  await expect(sidebarRail).toBeEnabled();
-
-  const box = await sidebarRail.boundingBox();
-  expect(box).not.toBeNull();
-
-  if (!box) return;
-
-  const startX = box.x + box.width / 2;
-  const startY = box.y + box.height / 2;
-
-  await page.mouse.move(startX, startY);
-  await page.mouse.down();
-  await page.mouse.move(startX + deltaX, startY, { steps: 8 });
-  await page.mouse.up();
-}
-
+// Divergencia Pimia: el helper vive en `../helpers/sidebar` porque el shell
+// monta dos barras y el arrastre necesita saber de qué lado está la que
+// conduce. Ver ahí el detalle; aquí solo se conduce la de Buzz.
 test("add community starts with create and join choices", async ({ page }) => {
   await installMockBridge(page, {});
   await page.goto("/");
