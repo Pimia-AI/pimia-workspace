@@ -422,7 +422,8 @@ contra un tenant vivo. No hubo que tocar código: los tres arreglos del mismo d�
 —el `watch.ignored` de Vite, la fase del diálogo y el llavero fuera del hilo
 principal— eran lo que faltaba.
 
-**Lo que se ejercitó**, contra `reformas-vera.taskai.work`:
+**Lo que se ejercitó**, contra un tenant real (host omitido: el repo es público
+y nombrarlo revela una relación comercial sin aportar nada al relato):
 
 | | |
 |---|---|
@@ -682,7 +683,15 @@ Cualquier script que toque el blob debe releer y comparar byte a byte después d
 escribir, con copia previa: `security` reemplaza la entrada **entera**, así que
 una escritura a medias se lleva identidad y claves de agentes por delante.
 
-### 2026-08-08 — macOS y Windows salen de los PRs (coste de Actions)
+### 2026-08-08 — macOS y Windows salen de los PRs (coste de Actions) — **REVERTIDO el mismo día**
+
+> **Esta divergencia ya no está en el código.** Se revirtió unas horas después,
+> al pasar el repo a público: los repos públicos tienen minutos ilimitados en
+> runners estándar, así que la restricción dejaba de ahorrar y solo costaba
+> cobertura. Se conserva el relato porque el dato que la motivó —el
+> multiplicador por sistema operativo— es el que no es obvio, y porque volverá
+> a aplicar si el repo vuelve a privado. El desenlace está al final.
+
 
 **El disparador**: la CI del PR #4 no arrancó. La anotación de GitHub —*«recent
 account payments have failed or your spending limit needs to be increased»*— no
@@ -747,3 +756,24 @@ plataforma:
 Si eso molesta en un PR concreto, la salida sin coste fijo es una escotilla —
 `workflow_dispatch` o una etiqueta tipo `ci:full` en la condición del job— para
 pedirlos a demanda. No se ha puesto todavía: primero conviene ver cuánto duele.
+
+**El desenlace, el mismo día.** El repo pasó a **público**, y con eso los
+runners estándar dejan de medirse: minutos ilimitados en Linux, Windows y macOS.
+La restricción perdió su única razón de ser y se revirtió — `ci.yml` vuelve a
+las condiciones de upstream, sin divergencia que mantener:
+
+```yaml
+  windows-rust:        if: push || rust || desktop-rust
+  desktop-build-macos: if: push || desktop || desktop-rust || rust
+```
+
+Con ello los PRs recuperan gratis lo que se había movido al merge: la
+compilación de `#[cfg(target_os = "macos")]` y `#[cfg(windows)]`. Que es justo
+lo que hace falta en este repo, donde el llavero tiene una rama por plataforma.
+
+**Lo que queda aprendido, y no depende de la visibilidad:** en un repo privado
+los 2000 minutos del plan Free no son 2000 — son 2000 de Linux, 1000 de Windows
+o **200 de macOS**. Si algún día se vuelve a privado, el recorte está en el
+historial de esta rama listo para reaplicar; y la escotilla a demanda
+(`workflow_dispatch` o etiqueta `ci:full`) sigue siendo la forma correcta de no
+perder la cobertura de plataforma al hacerlo.
