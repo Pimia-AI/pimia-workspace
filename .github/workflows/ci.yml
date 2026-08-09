@@ -920,6 +920,21 @@ jobs:
           fi
           echo "No dead token references found."
 
+  codex-sandbox:
+    name: Codex Sandbox Shim
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+      # Pimia divergence — see docs/UPSTREAM.md. Deliberately unfiltered: the
+      # shim guards a sandbox boundary, and it breaks from the outside (an
+      # adapter or Codex protocol change), not from edits under scripts/.
+      - name: Shim unit and end-to-end tests
+        run: just codex-sandbox-test
+
   server-cross-compile:
     name: Server Cross-Compile
     runs-on: ubuntu-latest
