@@ -97,6 +97,7 @@ buscar la acción en el sitio correcto en vez de donde está mirando.
 | Acción | Endpoint | Confirma | Permiso |
 |---|---|---|---|
 | Marcar como enviado / aceptado / rechazado | `POST /estimates/{id}/status` | No | `estimates:write` |
+| **Enviar por correo** | `POST /estimates/{id}/send` | **Diálogo** | `estimates:write` |
 | Duplicar | `POST /estimates/{id}/clone` | Sí | `estimates:write` |
 | Convertir en factura | `POST /estimates/{id}/convert-to-invoice` | Sí | `estimates:write` **+ `invoices:write`** |
 | Abrir el PDF | `estimate_pdf_url` del recurso | No | ninguno |
@@ -104,7 +105,9 @@ buscar la acción en el sitio correcto en vez de donde está mirando.
 **El cuidado es proporcional a lo que cuesta deshacer.** Un estado se cambia sin
 preguntar porque se deshace desde el mismo menú. Duplicar y convertir **crean un
 documento nuevo** que esta pantalla no puede borrar, así que preguntan. El PDF
-solo abre el navegador.
+solo abre el navegador. Y **enviar sale de la app hacia una persona real**: no
+pregunta «¿seguro?» —una pregunta que nadie lee—, abre un diálogo donde se ve
+**qué** se manda y **a quién**.
 
 ### La acción primaria cambia con el estado
 
@@ -114,7 +117,7 @@ en el `…`.
 
 | Estado | Primaria | Por qué |
 |---|---|---|
-| Borrador | Marcar como enviado | Todavía no ha salido. |
+| Borrador | **Enviar** | Todavía no ha salido. |
 | Enviado / Visto | Marcar como aceptado | Espera la respuesta del cliente. |
 | Aceptado | **Convertir en factura** | El final feliz del documento. |
 | Rechazado / Caducado | Duplicar | Volver a presupuestar. |
@@ -146,29 +149,44 @@ autorizar».
 > única salida de un permiso que falta. Se rescata en `classify_error`
 > (`src-tauri/src/pimia/api.rs`), reconociendo esa forma exacta y ninguna otra.
 
-### ⛔ Enviar no está, y no es un olvido
+### Enviar, y el remitente que no se pide
 
-`POST /estimates/{id}/send` valida `subject`, `body`, `from` y `to` como
-**obligatorios**, y `from` es el remitente de verdad del correo
-(`SendEstimateMail::build` lo pasa a `->from(...)`). El remitente configurado
-del tenant se lee con `GET /company/mail/config`, que el guard mapea al dominio
-`settings` — y **`settings:read` no está en el catálogo OAuth**
-(`config/oauth.php`). Peor: un scope fuera del catálogo **no da error, se ignora
-en silencio** (`ScopeRegistry::parse`), así que pedirlo no arregla nada.
+El diálogo (`PimiaEstimateSendDialog`) enseña **destinatario, asunto y mensaje**,
+los tres editables, con el aviso de que el correo sale ya. El destinatario viene
+del email del cliente y el mensaje de la plantilla de la empresa.
 
-Inventarse el remitente mandaría el correo desde una dirección que el SMTP del
-tenant quizá no autoriza: el envío se encola, muere en el worker y el usuario ve
-un «enviado» que no fue. **El arreglo está del lado del ERP**, y es pequeño:
-hacer `from` opcional en `SendEstimatesRequest` y que lo rellene
-`TenantMailSettings::from()`. El remitente es del tenant; no tiene por qué
-ponerlo un cliente de la API.
+**El remitente no es un campo, y eso es la mitad de la historia.** `from` es el
+remitente real del mensaje y es una propiedad de la instancia, no del envío.
+Hasta el 2026-08-09 la API lo exigía a quien llamaba — un dato que **ningún
+grant OAuth podía leer**, porque `GET /company/mail/config` cae en el dominio
+`settings` y `settings:read` no está en el catálogo (`config/oauth.php`), y un
+scope fuera del catálogo **se ignora en silencio** (`ScopeRegistry::parse`). Con
+eso, «enviar» era literalmente imposible desde fuera del panel.
 
-Mientras tanto, «marcar como enviado» cubre el caso real de mandarlo por fuera
-(WhatsApp, en mano), que es como salen la mayoría.
+Se arregló en el ERP (galeote/factSaas **#314** y **#315**): lo pone el servidor
+con `TenantMailSettings::from()`, y el que mande un cliente **se ignora** —
+respetarlo dejaba mandar correo desde cualquier dirección por el SMTP de la
+empresa, con su SPF y su DKIM. Por eso este código **no manda `from`**: añadirlo
+no rompería nada, pero sería prometer una elección que no existe.
+
+⚠️ **La plantilla sale de `GET /bootstrap`, no de `/company/settings`**, por lo
+mismo: aquello es dominio `settings`, esto es `meta`, que lee cualquier token.
+El precio es que `/bootstrap` devuelve el mundo entero, así que se pide **solo
+al abrir el diálogo** y se cachea. El cuerpo es **HTML con marcadores**
+(`{COMPANY_NAME}`, `{ESTIMATE_NUMBER}`…) que sustituye el servidor al enviar
+(`Estimate::getEmailBody`): se enseñan tal cual, como en el panel, porque
+resolverlos aquí daría un texto distinto del que el servidor va a componer.
+
+⚠️ El 200 significa **«aceptado para enviar»**, no «entregado»: el correo se
+encola (`App\Jobs\SendDocumentMail`). El aviso lo dice así.
+
+«Marcar como enviado» **sigue** en el menú, y no sobra: la mayoría de los
+presupuestos salen por WhatsApp o en mano, y registrar eso no es lo mismo que
+mandar un correo.
 
 > La vista previa (`GET /estimates/{id}/send/preview`) **devuelve HTML, no
 > JSON**. El puente Rust (`parse_success_body`) exige JSON, así que enseñarla
-> costaría además un camino de texto en Rust y un iframe aislado.
+> costaría un camino de texto en Rust y un iframe aislado. Sigue sin hacerse.
 
 ### ⚖️ Borrar no está, y facturas NO lo hereda
 
@@ -238,13 +256,16 @@ Así entraron `table` (cero dependencias nuevas) y `select`
   («Past-due balance»); la API de Pimia no publica ningún agregado de dinero de
   presupuestos, y sumar una página para llamarlo total es exactamente el bug
   que este pase quitó del panel. Van recuentos hasta que el servidor sume.
-- **Enviar y borrar.** Los dos por razones concretas, no por falta de tiempo:
-  ver *Las acciones de documento* arriba. El resto —estado, duplicar, PDF y
+- **Borrar.** Por una razón concreta, no por falta de tiempo: ver *Las
+  acciones de documento* arriba. Todo lo demás —estado, enviar, duplicar, PDF y
   convertir en factura— ya está.
 
-> **Corregido el 2026-08-08 (segunda vez).** Este apartado decía que las
-> acciones de documento se quedaban fuera enteras. Entraron cuatro de las seis
-> en el pase de acciones; las dos que faltan tienen su motivo escrito.
+> **Corregido dos veces, y las dos por lo mismo: «imposible» era «todavía no
+> investigado».** Primero este apartado decía que las acciones de documento se
+> quedaban fuera enteras; entraron cuatro en el pase de acciones. Después decía
+> que **enviar** era imposible por un scope que no existe — y lo era, hasta que
+> se arregló donde estaba el problema, que era el ERP (factSaas #314/#315,
+> desplegado el 2026-08-09). Solo queda fuera borrar, por la nota legal.
 
 > **Corregido el 2026-08-08.** Este apartado decía que las cabeceras ordenables
 > y el filtro de fechas eran imposibles «porque la API no los acepta». Era

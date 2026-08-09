@@ -486,6 +486,44 @@ export async function cloneEstimate(
   return raw ? normalizeEstimate(raw) : null;
 }
 
+/** Lo que hay que decirle al servidor para mandar un presupuesto. */
+export type PimiaEstimateMail = {
+  /** Destinatario. Sin él el servidor no tiene a quién mandarlo. */
+  to: string;
+  subject: string;
+  /** HTML, con los marcadores que el servidor sustituye al enviar. */
+  body: string;
+};
+
+/**
+ * Manda el presupuesto por correo al cliente.
+ *
+ * ⚠️ **Sale hacia fuera y no se deshace.** El servidor pasa el documento a
+ * `SENT` si estaba en borrador y **encola** el correo
+ * (`App\Jobs\SendDocumentMail`), así que un 200 aquí significa «aceptado para
+ * enviar», no «entregado».
+ *
+ * ⛔ **`from` no se manda.** El remitente es del tenant y lo pone el servidor
+ * (`SendDocumentMailRequest`, factSaas #314/#315): el que mandara un cliente se
+ * **ignora**, porque respetarlo dejaba mandar correo desde cualquier dirección
+ * por el SMTP de la empresa. Añadirlo aquí no rompería nada, pero sería código
+ * que promete algo que el servidor no cumple.
+ */
+export async function sendEstimate(
+  estimateId: string,
+  mail: PimiaEstimateMail,
+): Promise<void> {
+  await pimiaRequest<unknown>({
+    method: "POST",
+    path: `/estimates/${encodeURIComponent(estimateId)}/send`,
+    body: {
+      to: mail.to.trim(),
+      subject: mail.subject.trim(),
+      body: mail.body,
+    },
+  });
+}
+
 /**
  * La factura que sale de convertir un presupuesto.
  *
