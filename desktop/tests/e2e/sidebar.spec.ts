@@ -56,7 +56,14 @@ async function expectAppClickable(page: Page) {
 }
 
 async function dragSidebarRail(page: Page, deltaX: number) {
-  const sidebarRail = page.locator('[data-sidebar="rail"]');
+  // Divergencia Pimia: el shell monta DOS barras con rail propio (la del ERP a
+  // la izquierda y la de Buzz a la derecha), así que un `[data-sidebar="rail"]`
+  // a secas resuelve a dos elementos y Playwright aborta por modo estricto.
+  // Se acota a la barra de Buzz, que es la que estos tests conducen; el rail es
+  // descendiente del nodo que lleva el `data-testid`.
+  const sidebarRail = page
+    .getByTestId("app-sidebar")
+    .locator('[data-sidebar="rail"]');
   await expect(sidebarRail).toBeVisible();
   await expect(sidebarRail).toBeEnabled();
 
@@ -412,7 +419,13 @@ test("aligns the sidebar search with the channel title outside the Buzz theme", 
 
 test("sidebar rail resizes without toggling the sidebar", async ({ page }) => {
   await page.goto("/");
-  const rail = page.getByRole("button", { name: "Resize sidebar" });
+  // Acotado por lo mismo que `dragSidebarRail`. Aquí la ambigüedad no rompía
+  // todavía —`getByRole` no ve lo que está fuera del árbol de accesibilidad, y
+  // el rail del ERP suele estar oculto cuando esto corre—, o sea que pasaba por
+  // suerte: en cuanto las dos barras coincidan expandidas, aborta igual.
+  const rail = page
+    .getByTestId("app-sidebar")
+    .getByRole("button", { name: "Resize sidebar" });
   await rail.click();
   await expect(page.getByTestId("app-sidebar")).toBeVisible();
 
