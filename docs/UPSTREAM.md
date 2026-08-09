@@ -937,3 +937,30 @@ no existe. `ci.yml` la guarda con `save-if: github.event_name != 'pull_request'`
 de compilar nada por el bloqueo de facturación. Cada job de PR compila ~900
 dependencias desde cero. El primer merge a `main` que llegue al final puebla la
 caché y esos 4-16 minutos por job caen a menos de uno.
+
+### 2026-08-09 — Rechazado el revert de upstream #5323: el arnés sigue rechazando permisos desatendidos
+
+**Por qué.** El primer merge de sincronización (`desktop-v0.5.8`) traía, además
+de los bumps de versión, el revert de block/buzz#4609: el arnés `buzz-acp`
+pasaba de **rechazar** toda `session/request_permission` desatendida a
+**auto-aprobarla** con `allow_once`, y el modo de permisos por defecto pasaba
+de `dont-ask` a `bypassPermissions`. Traducido: cualquier agente gestionado
+podría ejecutar cualquier comando, con las reglas allow de Claude Code
+reducidas a decoración. Upstream casi seguro revirtió porque el rechazo dejaba
+mudos a sus agentes; nosotros ya habíamos resuelto esa parálisis por la vía
+estrecha (reglas allow explícitas para el CLI `buzz` + modos por agente — ver
+«El estado fuera del repo»), así que el revert nos quitaba seguridad sin
+darnos funcionalidad. Decisión del fundador: defender el rechazo.
+
+**Qué se defiende.** Los cuatro ficheros del revert se mantuvieron en nuestra
+versión durante el merge: `crates/buzz-acp/src/acp.rs` (la respuesta
+fail-closed `permission_denial_response`), `crates/buzz-acp/src/config.rs`
+(default `dont-ask` del `--permission-mode`), `crates/buzz-acp/src/lib.rs` y
+`crates/buzz-acp/src/pool.rs`.
+
+**Qué vigilar en cada merge.** Upstream va a seguir iterando sobre el manejo
+de permisos del arnés (un fix mergeado y revertido en días es una zona
+caliente). Cada sync que toque `crates/buzz-acp` debe repasar esta divergencia
+a mano: si upstream aterriza un modelo de permisos *con política configurable*
+(no todo-o-nada), evaluarlo — podría permitirnos volver a converger
+expresando nuestra postura como configuración.
