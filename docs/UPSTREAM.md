@@ -29,26 +29,61 @@ El push a `upstream` está deshabilitado en la configuración del clon
 (`git remote set-url --push upstream DISABLED_no_empujar_a_upstream`). Si
 clonas de nuevo, repite ese paso.
 
-## La estrategia: fork duro con cherry-picks selectivos
+## La estrategia: merge periódico por release
 
-Upstream es un proyecto vivo (25k ★, decenas de commits al día). Seguirlo con
-un rebase continuo cuesta más de lo que da. La política es:
+> **Cambio de política (2026-08-09).** La versión original de esta sección
+> decretaba fork duro sin merges, con cherry-picks solo de seguridad y
+> protocolo. Se decidió el día uno, sin datos. Dos días después los datos
+> dijeron otra cosa: upstream había movido 18 commits y una release, pero la
+> intersección entre lo que ellos tocaron y lo que nosotros tocamos era de
+> **4 ficheros**, todos con resolución mecánica. Mergear es barato si se hace
+> a menudo, y usamos el relay alojado por Block (`communities.buzz.xyz`), que
+> se actualiza a su calendario: quedarse atrás en protocolo no es una opción
+> que esté en nuestra mano. La política pasa a ser merge periódico.
 
-- **No hay merge ni rebase periódico de `upstream/main`.** Nuestra `main`
-  avanza sola.
-- **Se traen cherry-picks selectivos** de dos categorías: arreglos de
-  seguridad y cambios del protocolo/relay que nos dejarían incompatibles con
-  `communities.buzz.xyz`. Nada más — ni features nuevas ni refactores.
-- **Cada divergencia se anota abajo el día que entra.** La lección viene del
-  deliverer vendorizado: una divergencia sin documentar se paga entera meses
-  después, cuando ya nadie recuerda por qué el código difiere.
+- **La unidad de sincronización es el tag de release de upstream**
+  (`desktop-vX.Y.Z`), nunca `upstream/main` en un punto arbitrario: los tags
+  son los puntos que upstream probó y publicó.
+- **Cadencia: cada release, o semanal — lo que llegue antes.** La frecuencia
+  es la que mantiene barata la operación: merges pequeños mantienen la
+  intersección en un puñado de ficheros; esperar meses la convierte en una
+  migración.
+- **Las divergencias nuevas se escriben para sobrevivir merges**: módulos
+  propios aditivos (`desktop/src/features/pimia/` es el patrón), tocar
+  ficheros de upstream lo mínimo, y todo anotado en el registro de abajo,
+  que durante cada merge funciona de checklist de lo que hay que defender.
+- **La válvula de escape**: si algún día los merges duelen de verdad, la
+  salida no es quedarse atrás — es autoalojar el relay (la imagen Docker ya
+  la construye `sprout-oss`) y desacoplarse del calendario de Block. Mientras
+  el relay sea suyo, se sigue su ritmo.
 
-Para revisar qué se mueve arriba sin arrastrarlo:
+### El runbook de cada ciclo
 
 ```bash
-git fetch upstream
-git log --oneline HEAD..upstream/main
+git fetch upstream --tags
+git log --oneline HEAD..desktop-vX.Y.Z        # revisar qué entra
+git checkout -b sync/desktop-vX.Y.Z origin/main
+git merge --signoff desktop-vX.Y.Z
 ```
+
+Conflictos esperados y su regla fija de resolución:
+
+| Fichero | Regla |
+|---|---|
+| `desktop/src-tauri/tauri.conf.json` | Nuestra identidad (bundle id, nombre, esquema) gana; el `version` de upstream gana |
+| `.github/workflows/ci.yml` | Nuestro recorte de plataformas gana; jobs nuevos de upstream se revisan uno a uno |
+| `desktop/package.json` | El `version` de upstream gana; nuestros campos propios se conservan |
+| `pnpm-lock.yaml` | No se resuelve a mano: `pnpm install` y commitear el resultado |
+
+Cualquier conflicto **fuera** de esta tabla toca una divergencia del registro:
+buscarla abajo, resolver defendiéndola, y si upstream rediseñó la zona,
+actualizar la entrada del registro con la nueva forma de la divergencia.
+
+Después del merge: `just ci`, PR contra `main` (con `--repo`, ver registro),
+y tras actualizar la app en la máquina de trabajo, el smoke test de agentes
+de la sección «El estado fuera del repo». Los merges de sincronización no
+necesitan entrada propia en el registro — el merge commit y su PR son el
+registro — salvo que hayan obligado a reescribir una divergencia.
 
 ## La frontera innegociable: el ERP jamás pasa por el relay
 
