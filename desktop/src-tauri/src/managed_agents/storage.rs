@@ -445,7 +445,7 @@ fn persist_agent_keys_with(store: &impl KeyStore, records: &mut [ManagedAgentRec
 
 /// One-time migration of agent keys from the production keyring service
 /// (`"pimia-workspace-desktop"`) to the canonical dev service
-/// ([`crate::app_state::MAIN_DEV_KEYRING_SERVICE`]). Only runs in debug builds —
+/// ([`crate::app_state::keyring_config::MAIN_DEV_KEYRING_SERVICE`]). Only runs in debug builds —
 /// release builds never touch the production service from this path.
 ///
 /// Pimia divergence: both service names come from our own lineage. Upstream
@@ -466,7 +466,7 @@ pub fn migrate_agent_keys_to_dev_service(app: &tauri::AppHandle) {
     // worktree está aislado a propósito. El nombre canónico de esa instancia
     // vive en un único sitio para que este guard no se quede atrás si cambia.
     if !cfg!(feature = "system-keyring")
-        || keyring_service() != crate::app_state::MAIN_DEV_KEYRING_SERVICE
+        || keyring_service() != crate::app_state::keyring_config::MAIN_DEV_KEYRING_SERVICE
     {
         return;
     }

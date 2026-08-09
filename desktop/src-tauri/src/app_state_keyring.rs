@@ -49,6 +49,26 @@ pub(super) fn migration_marker_name(service: &str, default_name: &str) -> String
     }
 }
 
+/// Las dos migraciones de llavero que corren al arrancar un build de dev, en el
+/// único orden correcto.
+///
+/// Primero se sube lo que quedó en el cajón de dev sin ámbito
+/// ([`migrate_unscoped_dev_keyring`]) y después se copia de producción
+/// (`migrate_agent_keys_to_dev_service`): si el cajón sin ámbito guardaba claves
+/// de agentes, tienen que estar ya en el canónico cuando la segunda decida si le
+/// queda algo por copiar — esa decisión es «¿están todas las pubkeys en el
+/// destino?», y contestarla antes de la subida provocaría una lectura del
+/// llavero de producción que no hacía falta.
+///
+/// Vive aquí, y no en `migration.rs`, porque ese fichero está por encima del
+/// trinquete de 1000 líneas y no puede crecer; el punto de arranque se queda en
+/// una sola llamada.
+#[cfg(debug_assertions)]
+pub(crate) fn migrate_dev_keyrings(app: &tauri::AppHandle) {
+    migrate_unscoped_dev_keyring();
+    crate::managed_agents::migrate_agent_keys_to_dev_service(app);
+}
+
 /// Marca que se guarda **dentro** del blob canónico cuando la migración del
 /// servicio sin ámbito ha terminado. Con ella presente, los arranques siguientes
 /// no vuelven a abrir el cajón heredado (cero accesos, cero avisos del llavero).

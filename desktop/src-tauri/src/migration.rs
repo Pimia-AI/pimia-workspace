@@ -165,11 +165,7 @@ fn run_boot_migrations_inner(app: &tauri::AppHandle, reset_completed: bool) {
     // dev service and would log "has no key" for un-migrated entries).
     #[cfg(debug_assertions)]
     if is_dev {
-        // Antes que la migración de producción: si el cajón de dev sin ámbito
-        // guardaba claves de agentes, tienen que estar ya en el canónico cuando
-        // aquella decida si le queda algo por copiar.
-        crate::app_state::migrate_unscoped_dev_keyring();
-        crate::managed_agents::migrate_agent_keys_to_dev_service(app);
+        crate::app_state::keyring_config::migrate_dev_keyrings(app);
     }
     migrate_persona_provider_to_runtime(app);
     reconcile_legacy_command_names(app);
