@@ -19,10 +19,12 @@
 
 import type { Page } from "@playwright/test";
 
+// El host es deliberadamente genérico: el repo es público y el nombre de un
+// tenant real revela una relación comercial sin aportar nada a la prueba.
 export const PIMIA_MOCK_TENANT = {
-  id: "tenant-reformas-vera",
-  baseUrl: "https://reformas-vera.taskai.work",
-  label: "reformas-vera.taskai.work",
+  id: "tenant-demo",
+  baseUrl: "https://demo.taskai.work",
+  label: "demo.taskai.work",
   scopes: [
     "customers:read",
     "estimates:read",

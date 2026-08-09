@@ -389,7 +389,7 @@ pub fn resolve_persisted_identity(app: &AppHandle, state: &AppState) -> Result<(
 }
 
 #[path = "app_state_keyring.rs"]
-mod keyring_config;
+pub(crate) mod keyring_config;
 pub(crate) use keyring_config::keyring_service;
 
 /// Keyring key name for the human identity nsec.
