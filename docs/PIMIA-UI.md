@@ -87,6 +87,103 @@ Las líneas solo vienen en el `show`, y envueltas en un `when(...)`: por eso
 `lines` es `null` («no se pidieron») y no `[]` («no tiene»). Son cosas
 distintas y la UI las distingue.
 
+## Las acciones de documento
+
+Lo que la ficha y el menú `…` de la fila **hacen**, aparte de enseñar. Viven
+juntas en `ui/PimiaEstimateActions.tsx` y las dos superficies ofrecen lo mismo:
+si la lista deja marcar como aceptado y la ficha no, uno aprende que hay que
+buscar la acción en el sitio correcto en vez de donde está mirando.
+
+| Acción | Endpoint | Confirma | Permiso |
+|---|---|---|---|
+| Marcar como enviado / aceptado / rechazado | `POST /estimates/{id}/status` | No | `estimates:write` |
+| Duplicar | `POST /estimates/{id}/clone` | Sí | `estimates:write` |
+| Convertir en factura | `POST /estimates/{id}/convert-to-invoice` | Sí | `estimates:write` **+ `invoices:write`** |
+| Abrir el PDF | `estimate_pdf_url` del recurso | No | ninguno |
+
+**El cuidado es proporcional a lo que cuesta deshacer.** Un estado se cambia sin
+preguntar porque se deshace desde el mismo menú. Duplicar y convertir **crean un
+documento nuevo** que esta pantalla no puede borrar, así que preguntan. El PDF
+solo abre el navegador.
+
+### La acción primaria cambia con el estado
+
+Es el criterio del panel de Pimia: en cada punto del recorrido hay **una sola
+cosa** que uno viene a hacer, y esa es la que va en la cabecera. El resto vive
+en el `…`.
+
+| Estado | Primaria | Por qué |
+|---|---|---|
+| Borrador | Marcar como enviado | Todavía no ha salido. |
+| Enviado / Visto | Marcar como aceptado | Espera la respuesta del cliente. |
+| Aceptado | **Convertir en factura** | El final feliz del documento. |
+| Rechazado / Caducado | Duplicar | Volver a presupuestar. |
+
+### Las tres transiciones, y las tres que no
+
+`POST /status` acepta los seis estados; solo se ofrecen **enviado, aceptado y
+rechazado**, que son los que decide una persona. `VIEWED` lo pone el cliente al
+abrir el enlace, `EXPIRED` lo dicta la fecha de vencimiento y volver a `DRAFT`
+sería deshacer un envío que ya salió: ofrecerlos sería dejar mentir sobre hechos
+que el sistema ya sabe. Y el estado que el documento **ya tiene** tampoco sale
+en el menú — marcarlo otra vez no es una acción.
+
+### ⛔ Convertir obliga a reautorizar
+
+`config/api_guard.php` (`cross_domain_writes`) trata `convert-to-invoice` como
+una escritura en **dos** dominios, porque crea una factura de verdad. Por eso
+`REQUESTED_SCOPES` (`src-tauri/src/pimia/oauth.rs`) pide ahora también
+`invoices:write` — y **añadir un scope no toca los grants ya concedidos**: quien
+conectó antes sigue con los suyos hasta que vuelva a autorizar. La ficha lo
+comprueba contra `tenant.scopes` antes de prometer nada, y si el servidor
+contesta 403 de todas formas, el diálogo lo explica y ofrece «Volver a
+autorizar».
+
+> ⚠️ **La API no manda `missing_scope`.** El guard deniega con
+> `{"message": "Token lacks the invoices:write scope"}` y nada más — no hay un
+> solo `missing_scope` en todo `app/` de factSaas. Sin rescatarlo del texto,
+> `PimiaErrorState` nunca llegaba a ofrecer «Volver a autorizar», que es la
+> única salida de un permiso que falta. Se rescata en `classify_error`
+> (`src-tauri/src/pimia/api.rs`), reconociendo esa forma exacta y ninguna otra.
+
+### ⛔ Enviar no está, y no es un olvido
+
+`POST /estimates/{id}/send` valida `subject`, `body`, `from` y `to` como
+**obligatorios**, y `from` es el remitente de verdad del correo
+(`SendEstimateMail::build` lo pasa a `->from(...)`). El remitente configurado
+del tenant se lee con `GET /company/mail/config`, que el guard mapea al dominio
+`settings` — y **`settings:read` no está en el catálogo OAuth**
+(`config/oauth.php`). Peor: un scope fuera del catálogo **no da error, se ignora
+en silencio** (`ScopeRegistry::parse`), así que pedirlo no arregla nada.
+
+Inventarse el remitente mandaría el correo desde una dirección que el SMTP del
+tenant quizá no autoriza: el envío se encola, muere en el worker y el usuario ve
+un «enviado» que no fue. **El arreglo está del lado del ERP**, y es pequeño:
+hacer `from` opcional en `SendEstimatesRequest` y que lo rellene
+`TenantMailSettings::from()`. El remitente es del tenant; no tiene por qué
+ponerlo un cliente de la API.
+
+Mientras tanto, «marcar como enviado» cubre el caso real de mandarlo por fuera
+(WhatsApp, en mano), que es como salen la mayoría.
+
+> La vista previa (`GET /estimates/{id}/send/preview`) **devuelve HTML, no
+> JSON**. El puente Rust (`parse_success_body`) exige JSON, así que enseñarla
+> costaría además un camino de texto en Rust y un iframe aislado.
+
+### ⚖️ Borrar no está, y facturas NO lo hereda
+
+Un presupuesto **sí** se puede borrar; una **factura emitida NO** —es ilegal, y
+lo que corresponde es una rectificativa—. Esta pantalla es el molde que la
+factura hereda, así que el borrar se deja fuera a propósito: meter una acción
+que la réplica tiene que quitar es sembrar justo el error que la regla evita.
+Cuando entre, entra **solo para borradores**, que es la forma que facturas sí
+puede copiar.
+
+Y de paso, la ruta que el brief daba por buena no existe: `DELETE
+/estimates/{id}` está **excluida** (`->except(['destroy'])` en
+`routes/invoiceshelf_api.php`, con el comentario «el controlador no la
+implementa → 500»). El borrado real es `POST /estimates/delete` con `{ids: []}`.
+
 ### Lo que el servidor sabe hacer, y hay que usar
 
 `applyFilters` del modelo `Estimate` (y sus hermanos) acepta **`search`,
@@ -121,6 +218,7 @@ réplica de facturas va a heredar; ninguno sabe de dónde salen los datos.
 | `PimiaStatusTabs` | Las pestañas de estado subrayadas, compuestas sobre el bloque `tabs` de Buzz sin tocar el primitivo. |
 | `PimiaPagination` | El pie de una tabla: rango y total (`lib/pagination.describeRange`, con tests), cuántas filas por página y la navegación. |
 | `PimiaStates` | Sin conectar, cargando, error y vacío. El esqueleto tiene la forma de la tabla que va a sustituir, y el vacío ofrece la primera acción cuando la hay. |
+| `PimiaEstimateActions` | Las acciones de documento: la primaria que cambia con el estado y el menú `…`, con sus confirmaciones. Es el único de la lista que **no** es puro —usa los hooks de mutación—, y el molde del que saldrá el de facturas. |
 
 Además, `lib/dateRanges.ts` traduce el desplegable de fechas a
 `from_date`/`to_date` (probado: trimestres, meses de 30 y 31 días y el cambio
@@ -140,11 +238,13 @@ Así entraron `table` (cero dependencias nuevas) y `select`
   («Past-due balance»); la API de Pimia no publica ningún agregado de dinero de
   presupuestos, y sumar una página para llamarlo total es exactamente el bug
   que este pase quitó del panel. Van recuentos hasta que el servidor sume.
-- **Acciones de documento en el menú `…`** (enviar, duplicar, convertir a
-  factura, PDF). Existen en la API pero no en `features/pimia/api/`, y varias
-  son irreversibles o salen hacia fuera: entran cuando se diseñen, no de
-  relleno. Hoy el menú ofrece ver la ficha, ver el cliente y copiar el número —
-  todo lo que aparezca ahí tiene que hacer algo.
+- **Enviar y borrar.** Los dos por razones concretas, no por falta de tiempo:
+  ver *Las acciones de documento* arriba. El resto —estado, duplicar, PDF y
+  convertir en factura— ya está.
+
+> **Corregido el 2026-08-08 (segunda vez).** Este apartado decía que las
+> acciones de documento se quedaban fuera enteras. Entraron cuatro de las seis
+> en el pase de acciones; las dos que faltan tienen su motivo escrito.
 
 > **Corregido el 2026-08-08.** Este apartado decía que las cabeceras ordenables
 > y el filtro de fechas eran imposibles «porque la API no los acepta». Era
@@ -165,3 +265,17 @@ PLAYWRIGHT_BROWSERS_PATH=/Volumes/data512/.toolchains/ms-playwright \
 
 Las capturas salen en `desktop/test-results/pimia/`. Las del antes y el después
 de este pase están en `docs/assets/screenshots/pimia-*`.
+
+Las **acciones** tienen su propio spec, `pimia-estimate-actions.spec.ts`, y su
+propia carpeta (`test-results/pimia-acciones/`). Separados a propósito: aquel
+retrata pantallas y no toca nada, y este abre menús, confirma diálogos y
+**cambia estado contra el mock** —mezclarlos colaría un cambio de estado en la
+captura de la pantalla anterior—. Además de retratar, comprueba lo que solo se
+ve moviéndose: que tras un `POST /status` —que contesta `{success: true}` y no
+el documento— la ficha **relee** y la insignia cambia.
+
+⚠️ El mock (`tests/helpers/pimia.ts`) copia **la forma real** también en esto:
+`clone` devuelve el recurso nuevo, `convert-to-invoice` devuelve una factura con
+`invoice_number: null`, y el 403 de un permiso que falta llega **sin**
+`missing_scope`, como el de verdad. `installPimiaMock(page, {staleGrant: true})`
+reproduce un grant anterior a `invoices:write`.

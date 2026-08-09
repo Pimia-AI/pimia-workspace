@@ -14,11 +14,15 @@ import {
   type ListCustomersInput,
 } from "@/features/pimia/api/customers";
 import {
+  changeEstimateStatus,
+  cloneEstimate,
+  convertEstimateToInvoice,
   createEstimate,
   getEstimate,
   listEstimates,
   type ListEstimatesInput,
   type PimiaEstimateDraft,
+  type PimiaEstimateManualStatus,
 } from "@/features/pimia/api/estimates";
 import { useActivePimiaTenant } from "@/features/pimia/hooks/usePimiaAuth";
 
@@ -79,5 +83,57 @@ export function useCreatePimiaEstimate() {
         queryKey: dataKey(tenant?.id, "estimates"),
       });
     },
+  });
+}
+
+/**
+ * Invalida **todo** lo leído de este tenant.
+ *
+ * Las acciones de documento no son quirúrgicas: cambiar el estado de un
+ * presupuesto mueve su ficha, su fila en la lista, los recuentos de las
+ * pestañas y la lista dentro de la ficha de su cliente. Y ninguna de las tres
+ * devuelve el recurso actualizado —`status` contesta `{success: true}` a
+ * secas—, así que no hay nada que sembrar en la caché. Tirar del tenant entero
+ * cuesta un puñado de peticiones y es lo único que no deja una cifra vieja
+ * en pantalla.
+ */
+function useInvalidateTenantData() {
+  const queryClient = useQueryClient();
+  const tenant = useActivePimiaTenant();
+
+  return () => {
+    void queryClient.invalidateQueries({ queryKey: dataKey(tenant?.id) });
+  };
+}
+
+export function useChangePimiaEstimateStatus() {
+  const invalidate = useInvalidateTenantData();
+
+  return useMutation({
+    mutationFn: (input: {
+      estimateId: string;
+      status: PimiaEstimateManualStatus;
+    }) => changeEstimateStatus(input.estimateId, input.status),
+    onSuccess: invalidate,
+  });
+}
+
+export function useClonePimiaEstimate() {
+  const invalidate = useInvalidateTenantData();
+
+  return useMutation({
+    mutationFn: (estimateId: string) => cloneEstimate(estimateId),
+    onSuccess: invalidate,
+  });
+}
+
+export function useConvertPimiaEstimateToInvoice() {
+  const invalidate = useInvalidateTenantData();
+
+  return useMutation({
+    mutationFn: (estimateId: string) => convertEstimateToInvoice(estimateId),
+    // El presupuesto cambia al convertirse (`checkForEstimateConvertAction`
+    // puede moverle el estado), así que se relee igual que en las demás.
+    onSuccess: invalidate,
   });
 }

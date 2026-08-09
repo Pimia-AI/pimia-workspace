@@ -93,6 +93,15 @@ export type PimiaEstimate = {
   discountCents: number | null;
   taxCents: number | null;
   totalCents: number | null;
+  /**
+   * El PDF, tal como lo publica el servidor (`estimate_pdf_url`).
+   *
+   * Es una ruta **pública** del tenant por `unique_hash`
+   * (`/estimates/pdf/{hash}`, `routes/tenant.php`), no de `/api/v1`: se abre en
+   * el navegador del sistema y no lleva token ni scope. Por eso el PDF es la
+   * única acción de documento que funciona con cualquier grant.
+   */
+  pdfUrl: string | null;
 };
 
 export type PimiaEstimatePage = {
@@ -202,6 +211,7 @@ function normalizeEstimate(raw: RawEstimate): PimiaEstimate {
     discountCents: readCents(raw.discount_val),
     taxCents: readCents(raw.tax),
     totalCents: readCents(raw.total),
+    pdfUrl: text(raw.estimate_pdf_url),
   };
 }
 
@@ -416,4 +426,104 @@ export async function createEstimate(
   }
 
   throw lastError;
+}
+
+/**
+ * Los estados a los que esta pantalla deja mover un presupuesto.
+ *
+ * `POST /estimates/{id}/status` acepta los seis, pero solo tres los decide una
+ * persona: «lo mandé por fuera», «el cliente dijo que sí», «dijo que no». Los
+ * otros tres son hechos que el sistema ya sabe y ofrecerlos sería dejar mentir
+ * sobre ellos:
+ *
+ * - `VIEWED` lo pone el cliente al abrir el enlace del presupuesto.
+ * - `EXPIRED` lo dicta la fecha de vencimiento.
+ * - `DRAFT` sería deshacer un envío que ya salió.
+ */
+export const ESTIMATE_MANUAL_STATUSES = [
+  "SENT",
+  "ACCEPTED",
+  "REJECTED",
+] as const;
+
+export type PimiaEstimateManualStatus =
+  (typeof ESTIMATE_MANUAL_STATUSES)[number];
+
+/**
+ * Cambia el estado de un presupuesto.
+ *
+ * ⚠️ La respuesta es `{success: true}`, **no el presupuesto actualizado**
+ * (`ChangeEstimateStatusController`). No hay nada que normalizar: quien llame
+ * tiene que invalidar la caché para volver a leerlo.
+ */
+export async function changeEstimateStatus(
+  estimateId: string,
+  status: PimiaEstimateManualStatus,
+): Promise<void> {
+  await pimiaRequest<unknown>({
+    method: "POST",
+    path: `/estimates/${encodeURIComponent(estimateId)}/status`,
+    body: { status },
+  });
+}
+
+/**
+ * Duplica un presupuesto y devuelve el nuevo.
+ *
+ * El servidor hace todo el trabajo: reserva el siguiente número de la serie,
+ * copia líneas, impuestos y campos propios, y lo deja en `DRAFT` con la fecha
+ * de hoy. Aquí no se construye ningún cuerpo — mandar uno sería adivinar la
+ * numeración, que es justo lo que `createEstimate` tiene que reintentar.
+ */
+export async function cloneEstimate(
+  estimateId: string,
+): Promise<PimiaEstimate | null> {
+  const payload = await pimiaRequest<unknown>({
+    method: "POST",
+    path: `/estimates/${encodeURIComponent(estimateId)}/clone`,
+  });
+  const raw = unwrapItem<RawEstimate>(payload);
+  return raw ? normalizeEstimate(raw) : null;
+}
+
+/**
+ * La factura que sale de convertir un presupuesto.
+ *
+ * `invoiceNumber` es `null` casi siempre y **no es un fallo de la respuesta**:
+ * `ConvertEstimateController` crea la factura en `DRAFT` y deja el número, el
+ * `sequence_number` y el `unique_hash` sin asignar hasta que se publica. Numerar
+ * un borrador quemaría un número de la serie oficial y abriría un hueco si se
+ * vuelve a convertir. Así que no se promete un número que todavía no existe.
+ */
+export type PimiaConvertedInvoice = {
+  id: string;
+  invoiceNumber: string | null;
+  status: string | null;
+};
+
+/**
+ * Convierte un presupuesto en una factura borrador.
+ *
+ * ⛔ Es la única acción de esta pantalla que escribe en **otro dominio**, y el
+ * guard de la API lo sabe: además de `estimates:write` exige `invoices:write`
+ * (`config/api_guard.php`, `cross_domain_writes`). Un grant sin ese permiso se
+ * lleva un 403 `forbidden`, que es lo que la ficha traduce a «vuelve a
+ * autorizar».
+ */
+export async function convertEstimateToInvoice(
+  estimateId: string,
+): Promise<PimiaConvertedInvoice | null> {
+  const payload = await pimiaRequest<unknown>({
+    method: "POST",
+    path: `/estimates/${encodeURIComponent(estimateId)}/convert-to-invoice`,
+  });
+  const raw = unwrapItem<Record<string, unknown>>(payload);
+  if (!raw) {
+    return null;
+  }
+  return {
+    id: String(raw.id ?? ""),
+    invoiceNumber: text(raw.invoice_number),
+    status: text(raw.status),
+  };
 }

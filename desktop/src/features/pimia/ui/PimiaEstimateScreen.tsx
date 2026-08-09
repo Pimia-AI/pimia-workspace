@@ -14,7 +14,7 @@
 
 import * as React from "react";
 import type { ReactNode } from "react";
-import { ArrowLeft, User } from "lucide-react";
+import { ArrowLeft, Copy, User } from "lucide-react";
 
 import { useAppNavigation } from "@/app/navigation/useAppNavigation";
 import type {
@@ -29,6 +29,7 @@ import {
   PimiaAmount,
   PimiaAmountCell,
 } from "@/features/pimia/ui/PimiaAmountCell";
+import { PimiaEstimateActions } from "@/features/pimia/ui/PimiaEstimateActions";
 import { PimiaPageHeader } from "@/features/pimia/ui/PimiaPageHeader";
 import { PimiaEstimateStatusBadge } from "@/features/pimia/ui/PimiaStatusBadge";
 import {
@@ -38,6 +39,7 @@ import {
   PimiaRowsSkeleton,
 } from "@/features/pimia/ui/PimiaStates";
 import { Button } from "@/shared/ui/button";
+import { DropdownMenuItem } from "@/shared/ui/dropdown-menu";
 import {
   Table,
   TableBody,
@@ -197,17 +199,40 @@ export function PimiaEstimateScreen({ estimateId }: { estimateId: string }) {
         <>
           <PimiaPageHeader
             action={
-              estimate.customerId ? (
-                <Button
-                  onClick={() =>
-                    void goPimiaCustomer(estimate.customerId as string)
+              // La acción primaria la decide el estado del documento
+              // (`PimiaEstimateActions`), así que «ver el cliente» baja al
+              // menú: dos botones compitiendo por el mismo sitio dejan de
+              // decir cuál es el siguiente paso.
+              <div className="flex items-center gap-2">
+                <PimiaEstimateActions
+                  estimate={estimate}
+                  navigationItems={
+                    <>
+                      {estimate.customerId ? (
+                        <DropdownMenuItem
+                          onSelect={() =>
+                            void goPimiaCustomer(estimate.customerId as string)
+                          }
+                        >
+                          <User className="h-4 w-4" />
+                          Ver el cliente
+                        </DropdownMenuItem>
+                      ) : null}
+                      <DropdownMenuItem
+                        onSelect={() => {
+                          void navigator.clipboard?.writeText(
+                            estimate.estimateNumber,
+                          );
+                        }}
+                      >
+                        <Copy className="h-4 w-4" />
+                        Copiar el número
+                      </DropdownMenuItem>
+                    </>
                   }
-                  variant="outline"
-                >
-                  <User className="h-4 w-4" />
-                  Ver el cliente
-                </Button>
-              ) : null
+                  showPrimaryAction
+                />
+              </div>
             }
             back={
               <Button

@@ -25,11 +25,31 @@ export const PIMIA_MOCK_TENANT = {
   id: "tenant-demo",
   baseUrl: "https://demo.taskai.work",
   label: "demo.taskai.work",
-  scopes: ["customers:read", "estimates:read", "estimates:write", "items:read"],
+  scopes: [
+    "customers:read",
+    "estimates:read",
+    "estimates:write",
+    "invoices:write",
+    "items:read",
+  ],
   connectedAt: 1_770_000_000_000,
   expiresAt: 1_770_003_600_000,
   hasRefreshToken: true,
 } as const;
+
+/**
+ * Los permisos de un grant anterior a que la app pidiera `invoices:write`.
+ *
+ * No es un caso de laboratorio: es exactamente lo que tiene todo el que
+ * conectó su tenant antes de este cambio, y lo que ve al pulsar «convertir en
+ * factura» hasta que vuelve a autorizar.
+ */
+const PIMIA_MOCK_STALE_SCOPES = [
+  "customers:read",
+  "estimates:read",
+  "estimates:write",
+  "items:read",
+];
 
 type RawCustomer = {
   id: string;
@@ -54,6 +74,10 @@ type RawEstimate = {
   sub_total: number;
   tax: number;
   total: number;
+  /** El hash con el que se sirve el PDF público (`routes/tenant.php`). */
+  unique_hash: string;
+  /** `EstimateResource` lo publica siempre, también en el índice. */
+  estimate_pdf_url: string;
 };
 
 const CUSTOMERS: RawCustomer[] = [
@@ -268,6 +292,7 @@ function estimate(
   const subTotal = Math.round(total / 1.06);
   const vat = Math.round(subTotal * 0.21);
   const withholding = -Math.round(subTotal * 0.15);
+  const uniqueHash = `hash${id}`;
   return {
     id,
     estimate_number: estimateNumber,
@@ -279,6 +304,10 @@ function estimate(
     sub_total: subTotal,
     tax: vat + withholding,
     total,
+    unique_hash: uniqueHash,
+    // Ruta PÚBLICA del tenant por hash, no de `/api/v1`: el PDF se abre en el
+    // navegador sin token ni scope (`getEstimatePdfUrlAttribute`).
+    estimate_pdf_url: `${PIMIA_MOCK_TENANT.baseUrl}/estimates/pdf/${uniqueHash}`,
   };
 }
 
@@ -331,6 +360,65 @@ const LINES: Record<string, RawLine[]> = {
       total: 63_000,
     },
   ],
+  // Aceptado: es el estado desde el que se convierte en factura, así que su
+  // ficha tiene que poder retratarse entera. Las líneas suman su base exacta
+  // (1.284,500 € / 1,06 = 12.117,92 €) para que el desglose cuadre.
+  "130": [
+    {
+      name: "Reforma integral de baño principal",
+      description: "Demolición, fontanería, alicatado y sanitarios.",
+      quantity: 1,
+      unit_name: null,
+      price: 892_000,
+      discount_val: 0,
+      tax: 187_320,
+      total: 892_000,
+    },
+    {
+      name: "Sustitución de red de fontanería",
+      description: "Multicapa, incluye llaves de corte por estancia.",
+      quantity: 45,
+      unit_name: "m",
+      price: 5_600,
+      discount_val: 0,
+      tax: 52_920,
+      total: 252_000,
+    },
+    {
+      name: "Retirada de escombros y limpieza final",
+      description: null,
+      quantity: 1,
+      unit_name: null,
+      price: 67_792,
+      discount_val: 0,
+      tax: 14_236,
+      total: 67_792,
+    },
+  ],
+  // Rechazado: desde aquí la acción que toca es duplicar para volver a
+  // presupuestar. Base = 118.250 € / 1,06 = 1.115,57 €.
+  "128": [
+    {
+      name: "Cambio de bañera por plato de ducha",
+      description: "Plato de resina antideslizante, 120 × 70.",
+      quantity: 1,
+      unit_name: null,
+      price: 89_500,
+      discount_val: 0,
+      tax: 18_795,
+      total: 89_500,
+    },
+    {
+      name: "Mampara de vidrio templado",
+      description: null,
+      quantity: 1,
+      unit_name: null,
+      price: 22_057,
+      discount_val: 0,
+      tax: 4_632,
+      total: 22_057,
+    },
+  ],
 };
 
 export type PimiaMockOptions = {
@@ -338,6 +426,11 @@ export type PimiaMockOptions = {
   disconnected?: boolean;
   /** Listas vacías: para mirar los estados de vacío. */
   empty?: boolean;
+  /**
+   * Un grant de antes de que la app pidiera `invoices:write`: convertir en
+   * factura responde 403 y la ficha ofrece volver a autorizar.
+   */
+  staleGrant?: boolean;
 };
 
 /**
@@ -348,12 +441,15 @@ export async function installPimiaMock(
   options: PimiaMockOptions = {},
 ) {
   await page.addInitScript(
-    ({ customers, estimates, lines: LINES, opts, tenant }) => {
+    ({ customers, estimates, lines: LINES, opts, staleScopes, tenant }) => {
+      const connected = opts.staleGrant
+        ? { ...tenant, scopes: staleScopes }
+        : tenant;
       const status = opts.disconnected
         ? { tenants: [], activeTenantId: null }
-        : { tenants: [tenant], activeTenantId: tenant.id };
+        : { tenants: [connected], activeTenantId: connected.id };
       const allCustomers = opts.empty ? [] : customers;
-      const allEstimates = opts.empty ? [] : estimates;
+      const allEstimates = opts.empty ? [] : [...estimates];
 
       /**
        * Igual que responde Pimia, con su trampa incluida: el `meta` lleva a la
@@ -387,8 +483,104 @@ export async function installPimiaMock(
           ? a - b
           : String(a ?? "").localeCompare(String(b ?? ""));
 
-      const handle = (path: string, query: Record<string, unknown>) => {
+      /**
+       * Las acciones de documento, con **la forma que devuelve el servidor de
+       * verdad** y no la que vendría bien:
+       *
+       * - `status` contesta `{success: true}` a secas, **no el presupuesto
+       *   actualizado**: la UI tiene que releer para ver el cambio, y el mock
+       *   la obliga a ello igual que el servidor.
+       * - `clone` devuelve el recurso nuevo envuelto en `data`.
+       * - `convert-to-invoice` devuelve una factura en `DRAFT` con
+       *   **`invoice_number: null`**, porque el número se asigna al emitirla.
+       *   Un mock que lo rellenara dejaría pasar una UI que promete un número
+       *   inexistente.
+       */
+      const act = (clean: string) => {
+        const match =
+          /^\/estimates\/([^/]+)\/(status|clone|convert-to-invoice)$/.exec(
+            clean,
+          );
+        if (!match) {
+          return undefined;
+        }
+        const found = allEstimates.find(
+          (estimate) => estimate.id === decodeURIComponent(match[1]),
+        );
+        if (!found) {
+          return null;
+        }
+        return { action: match[2], estimate: found };
+      };
+
+      const handle = (
+        method: string,
+        path: string,
+        query: Record<string, unknown>,
+        body: Record<string, unknown>,
+      ) => {
         const clean = path.replace(/^\/api\/v1/, "");
+
+        if (method === "POST") {
+          const target = act(clean);
+          if (target === null) {
+            return null;
+          }
+          if (target) {
+            const { action, estimate } = target;
+
+            if (action === "status") {
+              estimate.status = String(body.status ?? estimate.status);
+              return { success: true };
+            }
+
+            if (action === "clone") {
+              const nextId = String(
+                Math.max(...allEstimates.map((row) => Number(row.id))) + 1,
+              );
+              const copy = {
+                ...estimate,
+                id: nextId,
+                estimate_number: `PRE-000${133 + allEstimates.length - estimates.length}`,
+                status: "DRAFT",
+                unique_hash: `hash${nextId}`,
+                estimate_pdf_url: `${tenant.baseUrl}/estimates/pdf/hash${nextId}`,
+              };
+              allEstimates.unshift(copy);
+              LINES[nextId] = LINES[estimate.id] ?? [];
+              return { data: copy };
+            }
+
+            // El guard deniega con `message` y NADA más: no existe un campo
+            // `missing_scope` en toda la API (comprobado en factSaas). El
+            // scope se rescata del texto en el puente Rust.
+            if (opts.staleGrant) {
+              return {
+                __reject: {
+                  kind: "forbidden",
+                  status: 403,
+                  message: "Token lacks the invoices:write scope",
+                },
+              };
+            }
+
+            return {
+              data: {
+                id: `9${estimate.id}`,
+                // Borrador sin numerar: `ConvertEstimateController` deja
+                // `invoice_number` para el momento de emitirla.
+                invoice_number: null,
+                status: "DRAFT",
+                paid_status: "UNPAID",
+                reference_number: estimate.estimate_number,
+                customer_id: estimate.customer_id,
+                sub_total: estimate.sub_total,
+                tax: estimate.tax,
+                total: estimate.total,
+              },
+            };
+          }
+        }
 
         if (clean === "/customers") {
           const search = String(query.search ?? "")
@@ -465,8 +657,6 @@ export async function installPimiaMock(
           const owner = allCustomers.find(
             (candidate) => candidate.id === found.customer_id,
           );
-          const vat = Math.round(found.sub_total * 0.21);
-          const withholding = -Math.round(found.sub_total * 0.15);
           return {
             data: {
               ...found,
@@ -533,12 +723,25 @@ export async function installPimiaMock(
             }
             if (command === "pimia_api_request") {
               const input = (args?.input ?? {}) as {
+                body?: Record<string, unknown>;
+                method?: string;
                 path?: string;
                 query?: Record<string, unknown>;
               };
-              return Promise.resolve(
-                handle(input.path ?? "", input.query ?? {}),
+              const result = handle(
+                (input.method ?? "GET").toUpperCase(),
+                input.path ?? "",
+                input.query ?? {},
+                input.body ?? {},
               );
+              // `invoke` RECHAZA con el error serializado del comando Tauri;
+              // devolverlo como valor haría pasar por buena una respuesta que
+              // en producción entra por el `catch`.
+              const rejection = (result as { __reject?: unknown } | null)
+                ?.__reject;
+              return rejection
+                ? Promise.reject(rejection)
+                : Promise.resolve(result);
             }
             return inner
               ? inner(command, args)
@@ -557,7 +760,9 @@ export async function installPimiaMock(
       opts: {
         disconnected: options.disconnected ?? false,
         empty: options.empty ?? false,
+        staleGrant: options.staleGrant ?? false,
       },
+      staleScopes: PIMIA_MOCK_STALE_SCOPES,
       tenant: PIMIA_MOCK_TENANT,
     },
   );

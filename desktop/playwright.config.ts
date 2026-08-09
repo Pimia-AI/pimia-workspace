@@ -22,6 +22,7 @@ export default defineConfig({
         "**/smoke.spec.ts",
         "**/dual-sidebars.spec.ts",
         "**/pimia-screens-screenshots.spec.ts",
+        "**/pimia-estimate-actions.spec.ts",
         "**/onboarding-docked-cta-screenshots.spec.ts",
         "**/identity-key-help.spec.ts",
         "**/key-import-reveal.spec.ts",

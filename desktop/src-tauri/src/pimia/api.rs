@@ -312,6 +312,32 @@ fn retry_delay_ms(retry_after: Option<u64>, attempt: u32) -> u64 {
     base.min(MAX_RETRY_DELAY_MS)
 }
 
+/// El scope que falta, sacado del mensaje cuando no viene en un campo propio.
+///
+/// ⚠️ **El guard de la API no manda `missing_scope`.** Deniega con el cuerpo
+/// `{"message": "Token lacks the invoices:write scope"}` y nada más
+/// (`EnforceApiTokenScopes::handle` en factSaas; comprobado: no hay un solo
+/// `missing_scope` en todo `app/`). Sin este rescate, `missingScope` llegaba
+/// siempre vacío al frontend y `PimiaErrorState` nunca llegaba a ofrecer
+/// «Volver a autorizar», que es justo la única salida de un scope que falta.
+///
+/// Se reconoce esa forma exacta y nada más: inventar un scope a partir de
+/// cualquier mensaje sería peor que no tenerlo.
+fn scope_from_message(message: &str) -> Option<String> {
+    let scope = message
+        .strip_prefix("Token lacks the ")?
+        .strip_suffix(" scope")?
+        .trim();
+
+    // Un scope es `dominio:acción`, sin espacios. Cualquier otra cosa es un
+    // mensaje que solo se le parece.
+    if scope.is_empty() || scope.contains(char::is_whitespace) || !scope.contains(':') {
+        return None;
+    }
+
+    Some(scope.to_string())
+}
+
 /// Traduce el error del tenant a algo que la UI pueda ramificar.
 pub(crate) fn classify_error(status: reqwest::StatusCode, body: &str) -> PimiaApiError {
     let parsed = serde_json::from_str::<serde_json::Value>(body).ok();
@@ -330,7 +356,8 @@ pub(crate) fn classify_error(status: reqwest::StatusCode, body: &str) -> PimiaAp
         .as_ref()
         .and_then(|value| value.get("missing_scope").or_else(|| value.get("scope")))
         .and_then(serde_json::Value::as_str)
-        .map(str::to_string);
+        .map(str::to_string)
+        .or_else(|| scope_from_message(&message));
 
     let kind = match status.as_u16() {
         401 => "unauthorized",
@@ -435,6 +462,33 @@ mod tests {
         assert_eq!(error.kind, "forbidden");
         assert_eq!(error.message, "falta permiso");
         assert_eq!(error.missing_scope.as_deref(), Some("estimates:write"));
+    }
+
+    #[test]
+    fn the_scope_is_rescued_from_the_message_the_guard_actually_sends() {
+        // La forma real de una denegación de scope: solo `message`.
+        let error = classify_error(
+            reqwest::StatusCode::FORBIDDEN,
+            r#"{"message":"Token lacks the invoices:write scope"}"#,
+        );
+        assert_eq!(error.kind, "forbidden");
+        assert_eq!(error.missing_scope.as_deref(), Some("invoices:write"));
+    }
+
+    #[test]
+    fn a_403_that_is_not_about_scopes_invents_none() {
+        for body in [
+            r#"{"message":"This action is unauthorized."}"#,
+            r#"{"message":"Token lacks the  scope"}"#,
+            r#"{"message":"Token lacks the permission to do that scope"}"#,
+            r#"{"message":"Token lacks the invoices scope"}"#,
+        ] {
+            assert_eq!(
+                classify_error(reqwest::StatusCode::FORBIDDEN, body).missing_scope,
+                None,
+                "cuerpo {body}"
+            );
+        }
     }
 
     #[test]

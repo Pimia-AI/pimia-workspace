@@ -14,7 +14,7 @@
  * rellenar el hueco por simetría sería inventar densidad.
  */
 
-import { Copy, FileText, MoreHorizontal, User } from "lucide-react";
+import { Copy, FileText, User } from "lucide-react";
 
 import type {
   PimiaEstimate,
@@ -22,18 +22,13 @@ import type {
 } from "@/features/pimia/api/estimates";
 import { formatCents } from "@/features/pimia/lib/money";
 import { PimiaAmountCell } from "@/features/pimia/ui/PimiaAmountCell";
+import { PimiaEstimateActions } from "@/features/pimia/ui/PimiaEstimateActions";
 import {
   PimiaSortableHead,
   type PimiaSortState,
 } from "@/features/pimia/ui/PimiaSortableHead";
 import { PimiaEstimateStatusBadge } from "@/features/pimia/ui/PimiaStatusBadge";
-import { Button } from "@/shared/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/shared/ui/dropdown-menu";
+import { DropdownMenuItem } from "@/shared/ui/dropdown-menu";
 import {
   Table,
   TableBody,
@@ -217,7 +212,11 @@ export function PimiaEstimateList({
   );
 }
 
-/** Solo acciones que hoy hacen algo: nada en gris que prometa y no cumpla. */
+/**
+ * El menú de la fila: navegar desde aquí, y encima las acciones de documento,
+ * que son las mismas que ofrece la ficha (`PimiaEstimateActions`). Todo lo que
+ * sale hace algo — nada en gris que prometa y no cumpla.
+ */
 function PimiaEstimateRowActions({
   estimate,
   onOpen,
@@ -230,40 +229,32 @@ function PimiaEstimateRowActions({
   const customerId = estimate.customerId;
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          aria-label={`Acciones de ${estimate.estimateNumber}`}
-          className="h-7 w-7 text-muted-foreground"
-          data-testid={`pimia-estimate-actions-${estimate.id}`}
-          size="icon"
-          variant="ghost"
-        >
-          <MoreHorizontal className="h-4 w-4" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
-        {onOpen ? (
-          <DropdownMenuItem onSelect={() => onOpen(estimate.id)}>
-            <FileText className="h-4 w-4" />
-            Ver el presupuesto
+    <PimiaEstimateActions
+      estimate={estimate}
+      navigationItems={
+        <>
+          {onOpen ? (
+            <DropdownMenuItem onSelect={() => onOpen(estimate.id)}>
+              <FileText className="h-4 w-4" />
+              Ver el presupuesto
+            </DropdownMenuItem>
+          ) : null}
+          {customerId && onOpenCustomer ? (
+            <DropdownMenuItem onSelect={() => onOpenCustomer(customerId)}>
+              <User className="h-4 w-4" />
+              Ver el cliente
+            </DropdownMenuItem>
+          ) : null}
+          <DropdownMenuItem
+            onSelect={() => {
+              void navigator.clipboard?.writeText(estimate.estimateNumber);
+            }}
+          >
+            <Copy className="h-4 w-4" />
+            Copiar el número
           </DropdownMenuItem>
-        ) : null}
-        {customerId && onOpenCustomer ? (
-          <DropdownMenuItem onSelect={() => onOpenCustomer(customerId)}>
-            <User className="h-4 w-4" />
-            Ver el cliente
-          </DropdownMenuItem>
-        ) : null}
-        <DropdownMenuItem
-          onSelect={() => {
-            void navigator.clipboard?.writeText(estimate.estimateNumber);
-          }}
-        >
-          <Copy className="h-4 w-4" />
-          Copiar el número
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+        </>
+      }
+    />
   );
 }
