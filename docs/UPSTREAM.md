@@ -825,3 +825,156 @@ no existe. `ci.yml` la guarda con `save-if: github.event_name != 'pull_request'`
 de compilar nada por el bloqueo de facturación. Cada job de PR compila ~900
 dependencias desde cero. El primer merge a `main` que llegue al final puebla la
 caché y esos 4-16 minutos por job caen a menos de uno.
+
+### 2026-08-09 — Un sandbox intermedio para los agentes Codex: «workspace-write + red»
+
+**El problema.** El adaptador ACP de Codex
+(`@agentclientprotocol/codex-acp`, hoy 1.1.9) ofrece tres modos y ninguno sirve
+para un agente gestionado:
+
+| Modo | Sandbox | Red | Sirve |
+|---|---|---|---|
+| `read-only` | `readOnly` | no | no puede trabajar |
+| `agent` (por defecto) | `workspaceWrite` | **no** | no llega al relay |
+| `agent-full-access` | `dangerFullAccess` | sí | **sin sandbox ninguno** |
+
+Un agente gestionado necesita las dos mitades a la vez: escritura confinada al
+workspace **y** salida a la red, porque habla con el relay a través del CLI
+`buzz`, que corre como subproceso sandboxeado. Hoy Honey está en
+`agent-full-access` — funciona, pero corre sin confinamiento y sin preguntar.
+
+**Por qué no bastaba con configurar.** El adaptador manda `sandboxPolicy` en
+línea en **cada** `turn/start`:
+
+```js
+// dist/index.js — sendPrompt()
+return await this.codexClient.runTurn({
+  approvalPolicy: agentMode.approvalPolicy,
+  sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, …),
+  …
+});
+```
+
+Esa política explícita por turno pisa cualquier configuración global, así que la
+inyección de `CODEX_CONFIG` en `codex_network_env`
+([config.rs](../crates/buzz-acp/src/config.rs)) **es letra muerta con este
+adaptador**. Se deja donde está: no molesta, y vuelve a la vida si el adaptador
+cambia de criterio (ver «qué vigilar»).
+
+Tampoco se puede añadir el modo desde fuera: la tabla `AgentMode` es privada del
+módulo y `getInitialAgentMode()` resuelve `INITIAL_AGENT_MODE` contra una lista
+cerrada de tres. Y `buzz-acp` no puede seleccionarlo aunque existiera, porque
+`agent_supports_mode` ([pool.rs](../crates/buzz-acp/src/pool.rs)) exige que el
+modo venga anunciado en `availableModes`.
+
+**Lo que se descartó, y por qué.**
+
+- **Forkear o vendorizar el adaptador.** El paquete es un bundle generado de
+  ~31 000 líneas. Meterlo en el repo es exactamente el error del *deliverer
+  vendorizado* del que sale la política de este documento. Publicarlo en npm
+  añade credenciales y una obligación permanente.
+- **Cambiarlo desde `buzz-acp` o el escritorio.** Imposible con este adaptador,
+  no por falta de ganas: la política va inline por turno y la lista de modos es
+  cerrada. No hay palanca de protocolo.
+- **Parchear el bundle instalado.** Además de frágil, es **peligroso aquí**: el
+  prefijo npm gestionado es `~/Library/Application Support/Buzz/node-tools`, con
+  «Buzz» literal — o sea, **se comparte con el Buzz real** que el fundador tiene
+  en uso diario. Escribir ahí muta la instalación de otra aplicación.
+
+**Lo que se hizo.** Un lanzador propio, `scripts/codex-sandbox/`, que arranca el
+bundle **sin modificar** y gira el único campo que hace falta en el cable entre
+el adaptador y el app-server de Codex:
+
+| Fichero | Qué es |
+|---|---|
+| `scripts/codex-sandbox/codex-acp` | lanzador `sh`; busca el Node gestionado y ejecuta el shim |
+| `scripts/codex-sandbox/codex-acp-shim.mjs` | el shim: traduce el modo y reescribe `sandboxPolicy` |
+| `scripts/codex-sandbox/codex-acp-shim.test.mjs` | 17 pruebas, incluidas dos de extremo a extremo |
+
+Con `INITIAL_AGENT_MODE=agent-workspace-network` el shim (1) traduce el modo a
+`agent` para el adaptador y (2) engancha `ChildProcess.prototype.spawn` para
+poner `networkAccess: true` en las políticas `workspaceWrite` que cruzan hacia
+el app-server. Cualquier otro valor pasa intacto y no se reescribe nada.
+
+El lanzador **se llama `codex-acp` a propósito**: `buzz-acp` deriva la identidad
+del runtime del basename del comando
+(`normalize_agent_command_identity`), así que un agente apuntado a este fichero
+por ruta absoluta sigue reconociéndose como Codex.
+
+Dos decisiones que conviene tener presentes:
+
+- **Solo se toca la red.** `readOnly` y `dangerFullAccess` no se ensanchan
+  nunca, y de `workspaceWrite` solo se mueve `networkAccess` — ni `writableRoots`
+  ni `approvalPolicy`. Sigue siendo `on-request`, que con el arnés
+  auto-rechazando (`handle_permission_request`) significa que toda escalada se
+  deniega explícitamente. Es el comportamiento de siempre, no uno nuevo.
+- **Falla siempre hacia menos capacidad, nunca hacia menos confinamiento.** Si
+  el shim no puede reescribir un frame, lo reenvía tal cual: el agente se queda
+  sin red (síntoma visible: no llega al relay), nunca sin sandbox.
+
+**Cómo se comprobó.** `just codex-sandbox-test` — 17 pruebas, dos de ellas de
+extremo a extremo con procesos hijo reales, que verifican que el frame que llega
+al app-server lleva `networkAccess: true` con el modo puesto y `false` sin él.
+Esa prueba ya pagó su precio: el primer intento enganchaba `childProcess.spawn`
+como propiedad del módulo, y el bundle hace `import { spawn } from
+"node:child_process"` — un binding con nombre que se fija al instanciar el
+módulo y que ese parche no alcanzaba jamás. De ahí el gancho en el prototipo.
+
+Además, contra el bundle **real**: `./scripts/codex-sandbox/codex-acp --version`
+imprime `@agentclientprotocol/codex-acp 1.1.9` (importa: el sondeo de versión
+del escritorio, `probe_codex_acp_version`, se queda contento), y con un
+app-server falso en `CODEX_PATH` se confirmó que el gancho se instala sobre el
+hijo real y que los frames del adaptador auténtico atraviesan el reescritor
+intactos.
+
+> Queda **una comprobación viva pendiente**: arrancar a Honey en el modo nuevo y
+> confirmar contra el relay de verdad que el CLI `buzz` sale a la red y que una
+> escritura fuera del workspace se deniega. Lo anterior prueba el mecanismo, no
+> el resultado en producción.
+
+**Qué vigilar en cada actualización del adaptador.** El shim depende de cuatro
+cosas del adaptador y de Codex; si alguna cambia, el síntoma es siempre el
+mismo: **Honey deja de llegar al relay**.
+
+1. **Que aparezca un modo oficial** con `workspaceWrite` + red en
+   `AgentMode.all()`. Si llega, esta divergencia se borra entera y se usa el
+   modo de upstream.
+2. **Que el adaptador deje de mandar `sandboxPolicy` inline por turno**. Si pasa
+   a respetar la configuración del hilo, `codex_network_env` revive solo y el
+   shim sobra.
+3. **Que Codex renombre `workspaceWrite` o `networkAccess`** en el protocolo del
+   app-server. El shim dejaría de encontrar qué parchear, en silencio.
+4. **Que cambie el framing NDJSON o el `app-server` del argv**. El shim avisa
+   por stderr (`unparseable frame …`), que sale en el log del agente.
+
+Comprobación rápida tras actualizar el adaptador:
+
+```bash
+just codex-sandbox-test && ./scripts/codex-sandbox/codex-acp --version
+```
+
+**Cómo migrar a Honey de `agent-full-access` al modo nuevo.**
+
+1. Parar la agente desde el escritorio.
+2. En el `managed-agents.json` de su instancia (hoy
+   `~/Library/Application Support/es.pimia.workspace.dev.claude-fase1-cierre-login/agents/`),
+   en su entrada:
+
+   ```json
+   "agent_command_override": "/Volumes/data512/pimia-workspace/scripts/codex-sandbox/codex-acp",
+   "env_vars": { "INITIAL_AGENT_MODE": "agent-workspace-network" }
+   ```
+
+   La ruta es la del **checkout principal**, no la de un worktree: los worktrees
+   van y vienen. `agent_command_override` gana sobre `agent_command` y sobre el
+   runtime de la persona (`effective_agent_command`).
+3. Arrancarla y confirmar en su log de stderr la línea
+   `pimia-codex-sandbox: agent-workspace-network: workspace-write sandbox with
+   outbound network`.
+4. Pedirle algo que use el CLI `buzz` (llega al relay) y algo que escriba fuera
+   del workspace (debe denegarse).
+
+Para volver atrás: quitar `agent_command_override` y dejar
+`INITIAL_AGENT_MODE=agent-full-access`. Si se deja el modo nuevo **sin** el
+lanzador, `getInitialAgentMode()` no lo encuentra y cae al `agent` de upstream —
+sandbox sí, red no; se pierde capacidad, no confinamiento.

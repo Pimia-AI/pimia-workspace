@@ -92,7 +92,11 @@ build-release:
     cargo build --workspace --release
 
 # Run repo lint and formatting checks
-check: fmt-check clippy desktop-check desktop-tauri-fmt-check desktop-tauri-clippy web-check mobile-check
+check: fmt-check clippy desktop-check desktop-tauri-fmt-check desktop-tauri-clippy web-check mobile-check codex-sandbox-test
+
+# Run tests for the Pimia Codex sandbox shim (see docs/UPSTREAM.md)
+codex-sandbox-test:
+    node --test scripts/codex-sandbox/codex-acp-shim.test.mjs
 
 # Format all Rust code
 fmt:
