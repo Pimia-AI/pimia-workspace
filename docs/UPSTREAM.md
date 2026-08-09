@@ -73,6 +73,118 @@ Por tanto:
 En el código esto se traduce en una regla revisable: **ningún módulo bajo
 `desktop/src/features/pimia/` importa nada de `desktop/src/shared/api/relay*`.**
 
+## El estado fuera del repo (lo que un clon no reconstruye)
+
+Un clon limpio de este repo compila la app, pero **no produce una flota de
+agentes que funcione**: eso depende de estado que vive en la máquina — llavero,
+settings de Claude Code, adaptadores npm, ficheros de la instancia. Esta
+sección es la receta para reconstruirlo y el mapa de qué actualización puede
+romper cada pieza. Todo se verificó en vivo el 2026-08-09, tras una semana de
+pagar a plazos lo que aquí está junto.
+
+**Regla de redacción, porque el repo es público:** aquí van mecanismos y
+nombres de claves de configuración — jamás valores. Ni tokens, ni claves
+privadas, ni pubkeys, ni URLs de la comunidad o del tenant real. Si al ampliar
+esta sección hace falta un ejemplo, se inventa (`wss://<comunidad>...`,
+`<pubkey-del-agente>`).
+
+### Los tres canales por los que llegan cambios
+
+| Canal | Quién lo controla | Riesgo |
+|---|---|---|
+| Este repo (git) | Nosotros — fork duro, cherry-picks a mano | Bajo: nada entra solo |
+| Adaptadores node-tools (npm) | El escritorio los instala/actualiza en `~/Library/Application Support/Buzz/node-tools/` | **Alto**: casi toda la receta de abajo depende de sus internals |
+| Relay alojado (`communities.buzz.xyz`) | Block, en su calendario | Medio: cubierto por la categoría «protocolo» de los cherry-picks |
+
+La configuración local (llavero, settings, ficheros de instancia) no la toca
+ninguna actualización directamente — pero su *significado* depende de los
+binarios de los dos primeros canales. Tras cualquier update de adaptadores,
+correr el smoke test del final.
+
+### La receta, pieza a pieza
+
+**1. Autenticación de los agentes claude.** El adaptador `claude-agent-acp`
+lanza el CLI nativo que empaqueta el Agent SDK, y ese CLI se autentica contra
+la entrada del llavero de macOS **«Claude Code-credentials»** — la misma que
+usa el CLI `claude` del usuario, y distinta del canal de auth de la app de
+escritorio de Claude. Por eso puede fallar toda la flota («401 OAuth access
+token has been revoked» en cada turno, lista de modelos vacía al crear agente)
+mientras las sesiones interactivas siguen funcionando. Arreglo: `claude /login`
+en un terminal reescribe el llavero; reiniciar los agentes después. Probe
+rápido sin Buzz: ejecutar el binario del SDK
+(`node-tools/lib/node_modules/@agentclientprotocol/claude-agent-acp/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude`)
+con `-p 'ok'`.
+
+**2. Permisos de ejecución de los agentes claude.** El arnés `buzz-acp`
+**auto-rechaza toda petición interactiva de permiso** — por diseño, no hay
+humano en su bucle; la tarjeta «Permission requested» del panel es puramente
+informativa. Como el prompt base obliga a publicar con `buzz messages send`,
+los agentes claude necesitan reglas allow, que el adaptador carga de los
+settings de Claude Code (`settingSources: ["user","project","local"]`). En
+`~/.claude/settings.json` → `permissions.allow`:
+
+```json
+["Bash(buzz)", "Bash(buzz:*)", "Bash(printf:*)"]
+```
+
+(`printf` porque el arnés enseña el patrón `printf '…' | buzz messages send
+--content -` para mensajes multilínea.) Alcance: **todos** los agentes claude
+del Mac a la vez, y también las sesiones interactivas del usuario — hoy no
+existe granularidad por agente.
+
+**3. Sandbox de los agentes codex.** El adaptador `codex-acp` trae tres modos
+cerrados (`read-only`, `agent`, `agent-full-access`) y pasa la política de
+sandbox **por turno**, así que el `CODEX_CONFIG` global que inyecta
+`buzz-acp` (`codex_network_env`) es letra muerta: el modo por defecto corre
+sin red y cada intento de escalar muere en el auto-rechazo del punto 2. Para
+un agente codex que deba usar el CLI, en su ficha (Edit agent → variables de
+entorno) o en `managed-agents.json`:
+
+```
+INITIAL_AGENT_MODE=agent-full-access
+```
+
+Condición innegociable: ese modo es **sin sandbox y sin preguntas** — el
+agente ejecuta con los permisos del usuario de macOS. Solo con
+`respond_to: allowlist` corto. La divergencia pendiente «modo
+workspace-write+red» existe para retirar este todo-o-nada.
+
+**4. MCPs: los agentes heredan el scope usuario.** Todo servidor MCP en el
+scope usuario de Claude Code (`~/.claude.json`) entra en **cada** agente
+claude. La regla operativa: **scope usuario vacío**; el MCP del ERP y los de
+infraestructura viven solo en scope `local` de los proyectos que los usan (el
+cwd de los agentes es el nido `~/.buzz`, no esos proyectos, así que no los
+ven). Darle un MCP a la flota es una decisión explícita: un `.mcp.json` en el
+nido — y aplica a todos los agentes claude a la vez.
+
+**5. Ficheros de la instancia.** En el `Application Support` de cada
+instancia dev, bajo `agents/`: `managed-agents.json` (por agente:
+`respond_to`/allowlist, `env_vars` — aquí viven el `INITIAL_AGENT_MODE` y los
+allowlists), `global-agent-config.json` (runtime preferido y env global; la
+capa de env es global < persona < agente). Se pueden editar con la app en
+marcha —el spawn relee de disco—, pero el agente debe reiniciarse para que
+aplique. **Jamás se suben al repo**: en modo sin llavero el store lleva nsecs
+en claro.
+
+**6. Workflows (cuando se monten).** Los mensajes que publica un workflow los
+firma **la clave del relay**, no la del owner: para que un agente reaccione a
+un workflow que lo menciona, el pubkey del relay (está en su NIP-11) tiene que
+estar en el allowlist del agente.
+
+### Smoke test tras cualquier actualización (~2 minutos)
+
+1. DM a un agente claude → responde en el DM, sin tarjeta de permiso en el
+   panel.
+2. DM a un agente codex → ídem.
+3. Crear un agente nuevo → el desplegable de modelos se puebla y no aparece
+   ningún 401.
+
+Si algo falla, los logs por agente están en
+`<Application Support de la instancia>/agents/logs/`, y los probes de los
+puntos 1–3 de la receta aíslan la pieza en un minuto: auth (binario del SDK
+con `-p`), permisos (buscar `reject_once` / `permission denied` en el log),
+sandbox (`ps eww` sobre el arnés buscando `INITIAL_AGENT_MODE`).
+
 ## Registro de divergencias
 
 ### 2026-08-08 — Identidad de la aplicación (Fase 0)
