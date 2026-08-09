@@ -518,7 +518,8 @@ desktop-standalone *ARGS: _ensure-sidecar-stubs
     fi
     source ../scripts/instance-env.sh
     INSTANCE_ID=$(node -e "console.log(JSON.parse(process.env.BUZZ_TAURI_CONFIG).identifier)")
-    export BUZZ_DEV_KEYRING_SERVICE="pimia-workspace-desktop-dev.${BUZZ_INSTANCE_SLUG:-main}"
+    # `BUZZ_DEV_KEYRING_SERVICE` lo exporta instance-env.sh, derivado del mismo
+    # identificador: fijarlo aquí era lo que dejaba a `just dev` sin fijarlo.
     if [[ -n "{{fresh}}" ]]; then
         ../scripts/reset-desktop-standalone-state.sh "$INSTANCE_ID" "$BUZZ_DEV_KEYRING_SERVICE"
     fi

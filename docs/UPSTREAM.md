@@ -422,7 +422,8 @@ contra un tenant vivo. No hubo que tocar código: los tres arreglos del mismo d�
 —el `watch.ignored` de Vite, la fase del diálogo y el llavero fuera del hilo
 principal— eran lo que faltaba.
 
-**Lo que se ejercitó**, contra `reformas-vera.taskai.work`:
+**Lo que se ejercitó**, contra un tenant real (host omitido: el repo es público
+y nombrarlo revela una relación comercial sin aportar nada al relato):
 
 | | |
 |---|---|
@@ -497,6 +498,11 @@ documentado con `${BUZZ_INSTANCE_SLUG:-main}`—, que tiene identidad pero **no*
 `pimia.tenants`. O sea: la identidad Nostr se conserva y no hay que rehacer el
 onboarding de Buzz, pero **hay que reconectar Pimia una vez**. A cambio, la
 conexión deja de evaporarse en cada cambio de rama, que era el problema.
+
+> **Actualización (misma fecha, entrada de más abajo).** Ese peaje ya no se
+> paga: `.main` es ahora el servicio canónico *declarado* y el vault de tenants
+> se migra al arrancar en vez de pedir que se reconecte. Ver
+> «`just dev` se quedaba con el llavero del worktree anterior».
 
 ### 2026-08-08 — El pase de diseño del ERP (patrones de la referencia)
 
@@ -587,3 +593,235 @@ generador de TanStack Router que cuestan media hora si no se conocen:
    generada. Se vio literalmente: el fichero volvía a su tamaño exacto anterior
    segundos después de generarlo bien. **Antes de añadir rutas, comprobar que
    no queda ninguno**: `pgrep -fl "vite|buzz-desktop"`.
+
+### 2026-08-08 — `just dev` se quedaba con el llavero del worktree anterior
+
+**El síntoma**: pulsar «arrancar» en un agente daba *«agent 2e2654ad… has no
+private key available — the OS keyring may be unreachable. Refusing to start
+without an identity»*. El llavero estaba perfecto: la clave existía y se leía sin
+problema. Lo que no cuadraba era **en qué cajón** se la buscaba.
+
+**La causa**: la identidad de instancia se decidía en dos sitios distintos.
+
+| Qué | Quién lo fijaba | Resultado |
+|---|---|---|
+| Identificador de bundle | `scripts/instance-env.sh`, desde el worktree de git | sólido |
+| Servicio de llavero | **solo** la receta `desktop-standalone` | heredable |
+
+`just dev`, `staging` y `production` no fijaban `BUZZ_DEV_KEYRING_SERVICE` **ni lo
+limpiaban**, así que un valor exportado por un lanzamiento anterior sobrevivía en
+la shell. El proceso que lo destapó llevaba
+`BUZZ_DEV_KEYRING_SERVICE=pimia-workspace-desktop-dev.claude-fase1-cierre-login`
+con `identifier=es.pimia.workspace.dev`: **ficha de agentes de la instancia
+principal, llavero del worktree fase1**. `hydrate_keys` pedía
+`agent:2e2654ad…` al cajón equivocado, el llavero contestaba «no existe», y
+`spawn_key_refusal` se negaba a arrancar sin identidad — correctamente, porque
+lanzar con `BUZZ_PRIVATE_KEY` vacío es lanzar sin identidad.
+
+Quedaba a la vista en el propio directorio de datos, con los dos marcadores de
+migración conviviendo:
+
+```
+~/Library/Application Support/es.pimia.workspace.dev/
+  identity.pimia-workspace-desktop-dev.main.migrated                    (08:41)
+  identity.pimia-workspace-desktop-dev.claude-fase1-cierre-login.migrated (18:12)
+```
+
+**El arreglo, en una frase**: el servicio de llavero se deriva del identificador
+ya calculado, en `instance-env.sh`, y se exporta **siempre**.
+
+```bash
+unset BUZZ_INSTANCE_SLUG BUZZ_WORKTREE_LABEL BUZZ_DEV_KEYRING_SERVICE   # nada se hereda
+INSTANCE_SCOPE="${INSTANCE_IDENTIFIER#es.pimia.workspace.dev}"          # "" o ".<slug>"
+INSTANCE_SCOPE="${INSTANCE_SCOPE#.}"                                    # "" o "<slug>"
+export BUZZ_DEV_KEYRING_SERVICE="pimia-workspace-desktop-dev.${INSTANCE_SCOPE:-main}"
+```
+
+Detalles que importan:
+
+- **`.main` es el canónico declarado**, también dentro de la app: el defecto de
+  `dev_keyring_service(None)` deja de ser el servicio pelado. Un arranque que no
+  pase por las recetas (`cargo run`, un `tauri dev` a mano) cae en el mismo cajón
+  que el checkout principal en vez de estrenar uno.
+- **El fallo de generación del icono ya no parte la instancia.** El
+  identificador se etiqueta dentro del `if swift …`; el llavero lo sigue, así que
+  si el icono falla se cae a la instancia principal *entera* en vez de mezclar el
+  directorio de datos de una con el llavero de otra.
+- **`BUZZ_SHARE_IDENTITY=1` leía donde no había nada.** Buscaba la identidad del
+  checkout principal en el servicio pelado, que no tiene `identity`; está en
+  `.main`. De ahí el aviso «no identity found in keyring service».
+- **`reset-desktop-dev-state.sh` reseteaba a medias.** Borraba los directorios de
+  datos de *todas* las instancias de dev pero solo el llavero pelado: identidad y
+  claves de agentes de `.main` y de cada worktree sobrevivían al «borrado». Ahora
+  enumera el linaje `pimia-workspace-desktop-dev.*` y los borra todos.
+- **El aviso mentía y mandaba a diagnosticar al revés.** `hydrate_keys` sí
+  distingue ausencia de caída (loguea «has no key in JSON or keyring»), pero
+  `spawn_key_refusal` funde los dos casos en «the OS keyring may be
+  unreachable». El texto se deja como está —el fail-closed es correcto— pero
+  conviene saber que «unreachable» puede querer decir «en otro cajón».
+
+**La migración, para no pagar el peaje.** Al declarar `.main` canónico, lo que
+quedó en el cajón pelado dejaría de verse. `migrate_unscoped_dev_keyring()` lo
+levanta al arrancar: una sola vez (marca `_unscoped_dev_migration_v1` dentro del
+blob canónico), sin pisar nada existente —`identity` y `agent:<pubkey>` vivos
+mandan siempre, porque sobreescribirlos resucitaría una clave rotada— y sin
+mover el original, así que un binario anterior sigue encontrando lo suyo. Si la
+lectura del cajón heredado falla, **no** se escribe la marca: se reintenta en el
+arranque siguiente en vez de dar por migrado lo que no se leyó.
+
+**Verificación**: `scripts/test-instance-env-keyring-scope.sh` comprueba el
+invariante —identificador y llavero describen la misma instancia— desde el
+checkout principal y desde un worktree, con y sin valores filtrados en el
+entorno. Se ejecuta a mano, como su vecino
+`test-reset-desktop-standalone-state.sh`.
+
+**Una trampa de `security(1)`, de regalo.** Escribir el blob del llavero por
+stdin lo **trunca a 128 bytes** sin avisar: es el buffer del prompt interactivo.
+Un blob con identidad y tres nsecs pasa de eso, así que la entrada quedó cortada
+a la mitad de un valor. El único camino fiel es `-w <valor>` por argumento.
+Cualquier script que toque el blob debe releer y comparar byte a byte después de
+escribir, con copia previa: `security` reemplaza la entrada **entera**, así que
+una escritura a medias se lleva identidad y claves de agentes por delante.
+
+### 2026-08-08 — macOS y Windows salen de los PRs (coste de Actions) — **REVERTIDO el mismo día**
+
+> **Esta divergencia ya no está en el código.** Se revirtió unas horas después,
+> al pasar el repo a público: los repos públicos tienen minutos ilimitados en
+> runners estándar, así que la restricción dejaba de ahorrar y solo costaba
+> cobertura. Se conserva el relato porque el dato que la motivó —el
+> multiplicador por sistema operativo— es el que no es obvio, y porque volverá
+> a aplicar si el repo vuelve a privado. El desenlace está al final.
+
+
+**El disparador**: la CI del PR #4 no arrancó. La anotación de GitHub —*«recent
+account payments have failed or your spending limit needs to be increased»*— no
+dice lo importante, que es **por qué** se agotó la cuota.
+
+`Pimia-AI` está en plan `free` y este repo es **privado**, así que los minutos de
+Actions se miden. Y no se cuentan 1:1: se cobran con **multiplicador por sistema
+operativo**, que es el dato que convierte «2000 minutos al mes» en algo mucho
+más pequeño.
+
+| Runner | Multiplicador | Con 2000 incluidos |
+|---|---|---|
+| Linux | 1× | 2000 min |
+| Windows | 2× | 1000 min |
+| **macOS** | **10×** | **200 min** |
+
+Un build de Tauri para macOS no baja de 15–20 minutos: **150–200 minutos
+cobrados por ejecución**. Es decir, un solo PR con el build de escritorio se
+podía llevar el mes entero. En repos públicos los runners estándar son gratis e
+ilimitados; por eso `block/buzz` no paga esto y nosotros sí. Misma CI, distinta
+visibilidad.
+
+**La divergencia**: en `ci.yml`, los dos únicos jobs que no son de Linux pasan a
+correr **solo en `push` a `main`/`release`** y se saltan en los pull requests.
+
+```yaml
+  windows-rust:        # antes: push || rust || desktop-rust
+  desktop-build-macos: # antes: push || desktop || desktop-rust || rust
+    if: github.event_name == 'push'
+```
+
+Se cambió la condición del job, **no el disparador del workflow**: así el check
+se sigue creando y se reporta como `skipped`, que las protecciones de rama
+tratan como aprobado. Quitar el trigger lo dejaría `pending` para siempre. (Hoy
+da igual —el plan Free no ofrece protección de rama en privados— pero el día que
+se contrate, esto ya está bien hecho.)
+
+**Qué NO se toca, y por qué no hacía falta:**
+
+- Los **cuatro canarios** (`macos-intel-canary`, `signed-macos-canary`,
+  `windows-canary`, `linux-canary`) y `desktop-release-cache-proof` ya eran
+  `workflow_dispatch`: nunca corrían solos.
+- **`release.yml`** solo va por tags `desktop-v[0-9]*`. Los builds firmados de
+  release siguen exactamente igual — ahí es donde vive el «y tags».
+- **`docker.yml`** usa `${{ matrix.runner }}`, y toda su matriz es Linux
+  (`ubuntu-24.04` / `ubuntu-24.04-arm`).
+- **`desktop-release-candidate.yml`** corre en PRs, pero en `ubuntu-latest`.
+- Los **14 jobs de Linux** conservan sus filtros por ruta intactos.
+
+**Qué cobertura pierde un PR, dicho sin adornos.** Poca de Rust y algo de
+plataforma:
+
+- `Desktop Core` (ubuntu) ya corre `desktop-tauri-clippy`, `desktop-tauri-check`,
+  `desktop-tauri-test` y `desktop-tauri-test-compiled-flags`, así que la crate de
+  Tauri **no** se queda sin clippy ni sin tests.
+- Lo que se mueve al *merge* es la compilación **específica de plataforma**: el
+  código bajo `#[cfg(target_os = "macos")]` (Keychain y `security-framework`,
+  notificaciones, rutas de WebKit) y bajo `#[cfg(windows)]` (`windows-sys`, el
+  backend de `keyring` en Windows). Un PR que toque `secret_store.rs` ya no ve
+  ese compilado hasta que entra en `main`.
+
+Si eso molesta en un PR concreto, la salida sin coste fijo es una escotilla —
+`workflow_dispatch` o una etiqueta tipo `ci:full` en la condición del job— para
+pedirlos a demanda. No se ha puesto todavía: primero conviene ver cuánto duele.
+
+**El desenlace, el mismo día.** El repo pasó a **público**, y con eso los
+runners estándar dejan de medirse: minutos ilimitados en Linux, Windows y macOS.
+La restricción perdió su única razón de ser y se revirtió — `ci.yml` vuelve a
+las condiciones de upstream, sin divergencia que mantener:
+
+```yaml
+  windows-rust:        if: push || rust || desktop-rust
+  desktop-build-macos: if: push || desktop || desktop-rust || rust
+```
+
+Con ello los PRs recuperan gratis lo que se había movido al merge: la
+compilación de `#[cfg(target_os = "macos")]` y `#[cfg(windows)]`. Que es justo
+lo que hace falta en este repo, donde el llavero tiene una rama por plataforma.
+
+**Lo que queda aprendido, y no depende de la visibilidad:** en un repo privado
+los 2000 minutos del plan Free no son 2000 — son 2000 de Linux, 1000 de Windows
+o **200 de macOS**. Si algún día se vuelve a privado, el recorte está en el
+historial de esta rama listo para reaplicar; y la escotilla a demanda
+(`workflow_dispatch` o etiqueta `ci:full`) sigue siendo la forma correcta de no
+perder la cobertura de plataforma al hacerlo.
+
+### 2026-08-09 — Windows sale del ciclo de CI (macOS es el único objetivo)
+
+👤 «de momento nos olvidamos de windows, primero construimos para mac que es lo
+que tenemos ahora mismo».
+
+El job `windows-rust` de `ci.yml` queda tras una variable de repositorio. **No se
+borra**: compila el workspace y la crate de Tauri con MSVC, y el día que haya
+build de Windows hace falta tal cual.
+
+```yaml
+if: >-
+  vars.CI_WINDOWS == 'true' && (github.event_name == 'push' || …)
+```
+
+Se reactiva sin tocar código:
+
+```bash
+gh variable set CI_WINDOWS --repo Pimia-AI/pimia-workspace --body true
+```
+
+**Qué se pierde**: la compilación MSVC, o sea el código bajo `#[cfg(windows)]` y
+los backends de `windows-sys`/`keyring` para Windows. Nadie más lo cubre — ni
+`Rust Lint` ni `Desktop Core`, que son de Linux.
+
+**Qué NO se gana, medido para que no se busque donde no está**: tiempo de reloj.
+
+| Job | Duración (frío) |
+|---|---|
+| `Desktop Core` | ≥16 min |
+| `Desktop Smoke E2E` (×4 shards) | 12-15 min |
+| **`Windows Rust`** | **7m 47s** |
+| `Desktop E2E Integration` | 7 min |
+| `Desktop Build (macOS)` | 5 min |
+| `Rust Lint` | 3 min |
+
+Los jobs corren en paralelo, así que la espera la fija `Desktop Core`, no
+Windows; y en un repo público los minutos son gratis. Lo que se gana es
+**quietud**: se acaba el rojo intermitente de `sherpa-onnx-sys`, que se descarga
+un binario precompilado al compilar y falla cuando el servidor corta la conexión
+(`os error 10054`).
+
+**Dónde está el tiempo de verdad**, por si se busca ahí: en la caché de Rust, que
+no existe. `ci.yml` la guarda con `save-if: github.event_name != 'pull_request'`
+—o sea, solo un push a `main`— y `main` acumula siete runs, todos fallidos antes
+de compilar nada por el bloqueo de facturación. Cada job de PR compila ~900
+dependencias desde cero. El primer merge a `main` que llegue al final puebla la
+caché y esos 4-16 minutos por job caen a menos de uno.

@@ -49,7 +49,24 @@ case "$(uname -s)" in
       # Divergencia Pimia: solo se borran servicios de NUESTRO linaje. Borrar
       # `buzz-desktop-dev` aquí destruiría el llavero de una instalación de
       # Buzz que conviva en la misma máquina.
-      while security delete-generic-password -s pimia-workspace-desktop-dev >/dev/null 2>&1; do :; done
+      #
+      # Y se borra el linaje ENTERO, no solo el servicio sin ámbito: arriba se
+      # barren los directorios de datos de todas las instancias de dev
+      # (`es.pimia.workspace.dev` y sus variantes de worktree), así que dejar
+      # vivos `…-dev.main` y `…-dev.<slug>` era un reset a medias — identidad y
+      # claves de agentes sobrevivían al «borrado».
+      dev_keyring_services=(pimia-workspace-desktop-dev)
+      while IFS= read -r service; do
+        [[ -n "$service" ]] && dev_keyring_services+=("$service")
+      done < <(
+        security dump-keychain 2>/dev/null \
+          | sed -n 's/^ *"svce"<blob>="\(pimia-workspace-desktop-dev\.[^"]*\)"$/\1/p' \
+          | sort -u
+      )
+      for service in "${dev_keyring_services[@]}"; do
+        log "Removing keychain service $service"
+        while security delete-generic-password -s "$service" >/dev/null 2>&1; do :; done
+      done
     fi
     ;;
   Linux)

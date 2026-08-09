@@ -966,7 +966,26 @@ jobs:
     # cold across four steps; budget generously.
     timeout-minutes: 45
     needs: [changes]
-    if: github.event_name == 'push' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.desktop-rust == 'true'
+    # Divergencia Pimia: Windows queda fuera del ciclo mientras el único
+    # objetivo de release sea macOS. El job se conserva entero —no se borra—
+    # porque el día que haya build de Windows hará falta tal cual.
+    #
+    # Se reactiva **sin tocar código**, definiendo la variable de repositorio:
+    #   gh variable set CI_WINDOWS --repo Pimia-AI/pimia-workspace --body true
+    #
+    # Lo que se pierde mientras esté apagado: la compilación MSVC del workspace
+    # y de la crate de Tauri, o sea el código bajo `#[cfg(windows)]` y los
+    # backends de `windows-sys`/`keyring` para Windows. Nadie más lo cubre.
+    #
+    # Lo que NO se gana, para que no se busque donde no está: tiempo de reloj.
+    # Este job corre en paralelo y no es el más lento (7m47s medidos, frente a
+    # los 16m de `Desktop Core` y los 12-15m de los shards de smoke), y en un
+    # repo público los minutos son gratis. Se gana quietud: se acaba el rojo
+    # intermitente de la descarga de `sherpa-onnx-sys`.
+    if: >-
+      vars.CI_WINDOWS == 'true' && (github.event_name == 'push' ||
+      needs.changes.outputs.rust == 'true' ||
+      needs.changes.outputs.desktop-rust == 'true')
     permissions:
       contents: read
     env:

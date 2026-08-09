@@ -64,6 +64,22 @@ doc/
 identity.key
 **/identity.key
 
+# Claves, certificados y perfiles de firma. Ninguno está versionado hoy; esto
+# es para que no lo esté nunca por descuido. En un repo público un secreto
+# empujado ya no se arregla borrando el fichero: hay que rotarlo.
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.mobileprovision
+*.p8
+id_rsa
+id_ed25519
+# El `.key` de firma del updater de Tauri (`tauri signer generate`). La pública
+# que acompaña es `.key.pub`, que no cae en este patrón y sigue versionable.
+*.key
+
 # Claude Code worktrees
 .claude/worktrees/
 

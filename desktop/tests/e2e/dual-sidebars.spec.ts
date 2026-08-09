@@ -11,6 +11,11 @@
 import { expect, test } from "@playwright/test";
 
 import { installMockBridge } from "../helpers/bridge";
+import {
+  BUZZ_SIDEBAR_TEST_ID,
+  dragSidebarRail,
+  PIMIA_SIDEBAR_TEST_ID,
+} from "../helpers/sidebar";
 
 const PIMIA_SIDEBAR = '[data-testid="pimia-sidebar"]';
 const BUZZ_SIDEBAR = '[data-testid="app-sidebar"]';
@@ -164,4 +169,36 @@ test("en una ventana estrecha el ERP se pliega solo", async ({ page }) => {
   await expect
     .poll(async () => Math.round((await pimia.boundingBox())?.width ?? 0))
     .toBeGreaterThan(48);
+});
+
+/**
+ * El rail ensancha hacia fuera en las dos barras.
+ *
+ * Con una sola barra a la izquierda, «arrastrar a la derecha» y «ensanchar» eran
+ * lo mismo, y los tests podían confundirlos sin coste. Con Buzz a la derecha ya
+ * no: el mismo gesto la estrecha. El spec de la barra de Buzz se cayó por
+ * exactamente esto —esperaba 364 y recibía 236, o sea 300 menos el arrastre en
+ * vez de más—, así que la dirección se cubre aquí, en el proyecto que corre sin
+ * relay ni base de datos.
+ */
+test("el rail ensancha cada barra hacia fuera, no hacia dentro", async ({
+  page,
+}) => {
+  // 1600 como el test de anchuras: por debajo del breakpoint compacto la barra
+  // del ERP arranca plegada y su rail va deshabilitado.
+  await page.setViewportSize({ height: 900, width: 1600 });
+  await installMockBridge(page);
+  await page.goto("/");
+
+  const width = async (selector: string) =>
+    Math.round((await page.locator(selector).boundingBox())?.width ?? 0);
+
+  const buzzBefore = await width(BUZZ_SIDEBAR);
+  await dragSidebarRail(page, 64, BUZZ_SIDEBAR_TEST_ID);
+  await expect.poll(() => width(BUZZ_SIDEBAR)).toBe(buzzBefore + 64);
+
+  // La del ERP vive a la izquierda: el puntero va al revés y el resultado, igual.
+  const pimiaBefore = await width(PIMIA_SIDEBAR);
+  await dragSidebarRail(page, 48, PIMIA_SIDEBAR_TEST_ID);
+  await expect.poll(() => width(PIMIA_SIDEBAR)).toBe(pimiaBefore + 48);
 });
