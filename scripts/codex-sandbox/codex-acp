@@ -10,7 +10,13 @@
 # the mode with `INITIAL_AGENT_MODE=agent-workspace-network`.
 set -eu
 
-SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+# Resolved with builtins only: managed agents are spawned with a curated PATH,
+# and a launcher that needs `dirname` on it would fail with a misleading
+# "missing shim" error rather than an honest one.
+case "$0" in
+    */*) SELF_DIR=$(CDPATH= cd -- "${0%/*}" && pwd -P) ;;
+    *) SELF_DIR=$(CDPATH= cd -- . && pwd -P) ;;
+esac
 SHIM="$SELF_DIR/codex-acp-shim.mjs"
 
 if [ ! -f "$SHIM" ]; then
