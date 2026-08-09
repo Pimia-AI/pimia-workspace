@@ -150,39 +150,27 @@ rápido sin Buzz: ejecutar el binario del SDK
 (`node-tools/lib/node_modules/@agentclientprotocol/claude-agent-acp/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude`)
 con `-p 'ok'`.
 
-**2. Permisos de ejecución de los agentes claude.** El arnés `buzz-acp`
-**auto-rechaza toda petición interactiva de permiso** — por diseño, no hay
-humano en su bucle; la tarjeta «Permission requested» del panel es puramente
-informativa. Como el prompt base obliga a publicar con `buzz messages send`,
-los agentes claude necesitan reglas allow, que el adaptador carga de los
-settings de Claude Code (`settingSources: ["user","project","local"]`). En
-`~/.claude/settings.json` → `permissions.allow`:
-
-```json
-["Bash(buzz)", "Bash(buzz:*)", "Bash(printf:*)"]
-```
-
-(`printf` porque el arnés enseña el patrón `printf '…' | buzz messages send
---content -` para mensajes multilínea.) Alcance: **todos** los agentes claude
-del Mac a la vez, y también las sesiones interactivas del usuario — hoy no
-existe granularidad por agente.
+**2. Permisos de ejecución.** Desde el sync de `desktop-v0.5.8` (registro:
+«Tomado el revert de upstream #5323»), el arnés **auto-aprueba** las
+peticiones de permiso de los agentes y los claude corren en
+`bypassPermissions`: no hay frontera de comandos, y las tarjetas «Permission
+requested» del panel terminan en Approved solas. La contención real es quién
+puede activar a cada agente (`respond_to`) y el punto 4 (MCPs). Las reglas
+allow de `~/.claude/settings.json` (`Bash(buzz)`, `Bash(buzz:*)`,
+`Bash(printf:*)`) quedaron de la era del auto-rechazo — hoy no son
+load-bearing; se conservan por si la política de upstream vuelve a girar.
+Historia completa y qué vigilar: la entrada del registro.
 
 **3. Sandbox de los agentes codex.** El adaptador `codex-acp` trae tres modos
 cerrados (`read-only`, `agent`, `agent-full-access`) y pasa la política de
 sandbox **por turno**, así que el `CODEX_CONFIG` global que inyecta
-`buzz-acp` (`codex_network_env`) es letra muerta: el modo por defecto corre
-sin red y cada intento de escalar muere en el auto-rechazo del punto 2. Para
-un agente codex que deba usar el CLI, en su ficha (Edit agent → variables de
-entorno) o en `managed-agents.json`:
-
-```
-INITIAL_AGENT_MODE=agent-full-access
-```
-
-Condición innegociable: ese modo es **sin sandbox y sin preguntas** — el
-agente ejecuta con los permisos del usuario de macOS. Solo con
-`respond_to: allowlist` corto. La divergencia pendiente «modo
-workspace-write+red» existe para retirar este todo-o-nada.
+`buzz-acp` (`codex_network_env`) es letra muerta. Con el arnés auto-aprobando
+(punto 2), el modo `agent` por defecto **funciona sin tocar nada**: el CLI
+falla por red dentro del sandbox, codex pide escalar y la escalación se
+aprueba sola. `INITIAL_AGENT_MODE` ya no es necesario — si quedó
+`agent-full-access` en `env_vars` de algún agente de la era del auto-rechazo,
+retirarlo y reiniciar el agente. (El modo de sandbox propio
+«workspace-write + red» se descartó: PR #9, cerrado sin mergear.)
 
 **4. MCPs: los agentes heredan el scope usuario.** Todo servidor MCP en el
 scope usuario de Claude Code (`~/.claude.json`) entra en **cada** agente
@@ -208,17 +196,18 @@ estar en el allowlist del agente.
 
 ### Smoke test tras cualquier actualización (~2 minutos)
 
-1. DM a un agente claude → responde en el DM, sin tarjeta de permiso en el
-   panel.
+1. DM a un agente claude → responde en el DM (una tarjeta de permiso en el
+   panel, si aparece, debe terminar en Approved, no en Denied).
 2. DM a un agente codex → ídem.
 3. Crear un agente nuevo → el desplegable de modelos se puebla y no aparece
    ningún 401.
 
 Si algo falla, los logs por agente están en
-`<Application Support de la instancia>/agents/logs/`, y los probes de los
-puntos 1–3 de la receta aíslan la pieza en un minuto: auth (binario del SDK
-con `-p`), permisos (buscar `reject_once` / `permission denied` en el log),
-sandbox (`ps eww` sobre el arnés buscando `INITIAL_AGENT_MODE`).
+`<Application Support de la instancia>/agents/logs/`, y los probes de la
+receta aíslan la pieza en un minuto: auth (binario del SDK con `-p`),
+permisos (buscar `reject_once` / `permission denied` en el log — si aparecen,
+el binario del arnés es anterior al sync de 0.5.8), sandbox de codex
+(`ps eww` sobre el arnés: no debería quedar ningún `INITIAL_AGENT_MODE`).
 
 ## Registro de divergencias
 
@@ -972,3 +961,35 @@ no existe. `ci.yml` la guarda con `save-if: github.event_name != 'pull_request'`
 de compilar nada por el bloqueo de facturación. Cada job de PR compila ~900
 dependencias desde cero. El primer merge a `main` que llegue al final puebla la
 caché y esos 4-16 minutos por job caen a menos de uno.
+
+### 2026-08-09 — Tomado el revert de upstream #5323: el arnés vuelve a auto-aprobar permisos
+
+**Qué trae.** El primer merge de sincronización (`desktop-v0.5.8`) incluía,
+además de los bumps de versión, el revert de block/buzz#4609: el arnés
+`buzz-acp` deja de **rechazar** toda `session/request_permission` desatendida
+y vuelve a **auto-aprobarla** con `allow_once`, con el modo de permisos por
+defecto en `bypassPermissions` (antes `dont-ask`).
+
+**La decisión y su porqué.** El primer instinto fue defender el rechazo como
+divergencia (nuestras reglas allow ya habían devuelto la funcionalidad por la
+vía estrecha). Decisión final del fundador: **seguir el camino de upstream
+completo** — cero divergencia de código en `buzz-acp`, y también se descartó
+el modo de sandbox propio para codex (PR #9, cerrado sin mergear). El
+razonamiento: `buzz-acp` es zona caliente (un fix mergeado y revertido en
+días), y mantener ahí postura propia + un lanzador propio del adaptador es
+deuda de mantenimiento permanente para un fork cuyo producto es Pimia, no la
+seguridad del arnés.
+
+**Lo que esto significa y dónde queda la contención.** Desde este merge no
+existe frontera de *comandos* para los agentes gestionados: el arnés aprueba
+lo que el agente pida (claude además corre en `bypassPermissions`). La
+contención pasa a ser: **quién puede activar a cada agente** (`respond_to` /
+allowlists — mantenerlos cortos), **qué MCPs heredan** (scope usuario vacío,
+ver «El estado fuera del repo») y **qué alcanza la máquina** donde corren.
+Efecto lateral bueno: los agentes codex funcionan en su modo `agent` por
+defecto (la escalación de red se auto-aprueba), así que `INITIAL_AGENT_MODE`
+deja de ser necesario en la configuración de instancia.
+
+**Qué vigilar en cada merge.** Upstream sigue iterando sobre permisos del
+arnés. Si aterriza un modelo *con política configurable* (no todo-o-nada),
+evaluar adoptarlo para recuperar frontera de comandos vía configuración.
