@@ -37,13 +37,35 @@ export function formatCents(cents: number | null | undefined): string {
  * Lee un importe venido de la API. Acepta número o cadena numérica (Laravel
  * devuelve enteros como cadena en algunos recursos) y **nunca** redondea: si no
  * es un entero, algo se ha convertido mal más arriba y es mejor enterarse.
+ *
+ * ⚠️ **La API no manda el dinero con una sola forma.** `total`, `sub_total` y
+ * `tax` llegan como enteros (`45050`), pero **`due_amount` llega como cadena
+ * decimal** (`"45050.00"`), en clientes y en facturas: es un `decimal:2` de
+ * Laravel sobre una columna que ya está en céntimos. Que la cola sea `.00` no
+ * añade información, así que se acepta y se descarta.
+ *
+ * Comprobado contra un tenant vivo (2026-08-10): la factura `FAC-000002` trae
+ * `total: 1000` y `due_amount: "1000.00"` para la misma cantidad, y la deuda
+ * del cliente (`"2000.00"`) es la suma de sus dos facturas pendientes.
+ *
+ * Un decimal **distinto de cero** sigue devolviendo `null` a propósito: un
+ * `decimal:2` de un entero siempre acaba en ceros, así que `"1234.56"` sería
+ * otra unidad, y adivinarla es exactamente el error que este módulo existe para
+ * evitar.
  */
 export function readCents(value: unknown): number | null {
   if (typeof value === "number" && Number.isInteger(value)) {
     return value;
   }
-  if (typeof value === "string" && /^-?\d+$/.test(value.trim())) {
-    return Number.parseInt(value.trim(), 10);
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (/^-?\d+$/.test(trimmed)) {
+      return Number.parseInt(trimmed, 10);
+    }
+    const decimalCast = /^(-?\d+)\.0+$/.exec(trimmed);
+    if (decimalCast) {
+      return Number.parseInt(decimalCast[1], 10);
+    }
   }
   return null;
 }

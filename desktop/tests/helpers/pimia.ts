@@ -15,9 +15,30 @@
  * Los datos son de una empresa de reformas, que es el sector del tenant de
  * pruebas: importes en **céntimos enteros** y campos en `snake_case`, tal como
  * los devuelve la API.
+ *
+ * ⛔ **El mock copia lo que el servidor manda, no lo que uno querría.** Va en
+ * mayúsculas porque ya ha costado cuatro veces: `meta.*_total_count` (que
+ * ignora los filtros), los impuestos que viven en las líneas y no en la
+ * cabecera, el `name` que ya trae el porcentaje dentro, y `due_amount`, que
+ * llega como **cadena decimal** y no como entero. Cada vez, la suite en verde
+ * mientras la pantalla mentía. Si aparece una forma nueva en datos reales, se
+ * replica aquí ANTES de tocar la UI.
  */
 
 import type { Page } from "@playwright/test";
+
+/**
+ * `due_amount` tal como lo manda la API: un `decimal:2` de Laravel sobre una
+ * columna que ya está en céntimos, o sea la **cadena** `"45050.00"` y no el
+ * entero `45050`. Se escribe con esta ayuda para que el dato de arriba siga
+ * leyéndose en céntimos, que es como se razona sobre él.
+ *
+ * Lo lee `lib/money.readCents`. Mientras el mock lo mandó entero, la columna
+ * «Pendiente» salía bien en pruebas y en blanco contra un tenant de verdad.
+ */
+function dueAmount(cents: number): string {
+  return cents.toFixed(2);
+}
 
 // El host es deliberadamente genérico: el repo es público y el nombre de un
 // tenant real revela una relación comercial sin aportar nada a la prueba.
@@ -60,7 +81,8 @@ type RawCustomer = {
   company_name: string | null;
   contact_name: string | null;
   tax_id: string | null;
-  due_amount: number;
+  /** Cadena decimal, no entero: ver `dueAmount()`. */
+  due_amount: string;
   created_at: string;
 };
 
@@ -90,7 +112,7 @@ const CUSTOMERS: RawCustomer[] = [
     company_name: "Construcciones Peñalba S.L.",
     contact_name: "Rosa Peñalba",
     tax_id: "B96842517",
-    due_amount: 1_284_500,
+    due_amount: dueAmount(1_284_500),
     created_at: "2025-11-04",
   },
   {
@@ -101,7 +123,7 @@ const CUSTOMERS: RawCustomer[] = [
     company_name: null,
     contact_name: null,
     tax_id: "52341987K",
-    due_amount: 0,
+    due_amount: dueAmount(0),
     created_at: "2026-01-19",
   },
   {
@@ -112,7 +134,7 @@ const CUSTOMERS: RawCustomer[] = [
     company_name: "Hostelería del Turia S.A.",
     contact_name: "Álvaro Sanchís",
     tax_id: "A46127893",
-    due_amount: 452_000,
+    due_amount: dueAmount(452_000),
     created_at: "2025-06-30",
   },
   {
@@ -123,7 +145,7 @@ const CUSTOMERS: RawCustomer[] = [
     company_name: "C.P. Gran Vía 42",
     contact_name: "Julián Ortega",
     tax_id: "H98213456",
-    due_amount: 289_900,
+    due_amount: dueAmount(289_900),
     created_at: "2025-09-12",
   },
   {
@@ -134,7 +156,7 @@ const CUSTOMERS: RawCustomer[] = [
     company_name: "Dental Sorolla S.L.P.",
     contact_name: "Nuria Bellver",
     tax_id: "B97654321",
-    due_amount: 0,
+    due_amount: dueAmount(0),
     created_at: "2026-02-02",
   },
   {
@@ -145,7 +167,7 @@ const CUSTOMERS: RawCustomer[] = [
     company_name: null,
     contact_name: "Toni Bru",
     tax_id: "24817365P",
-    due_amount: 76_450,
+    due_amount: dueAmount(76_450),
     created_at: "2025-12-21",
   },
   {
@@ -156,7 +178,7 @@ const CUSTOMERS: RawCustomer[] = [
     company_name: "Cabanyal 21 Gestión S.L.",
     contact_name: "Elena Roig",
     tax_id: "B12984730",
-    due_amount: 1_950_000,
+    due_amount: dueAmount(1_950_000),
     created_at: "2025-04-08",
   },
   {
@@ -167,7 +189,7 @@ const CUSTOMERS: RawCustomer[] = [
     company_name: null,
     contact_name: null,
     tax_id: "73129845X",
-    due_amount: 34_000,
+    due_amount: dueAmount(34_000),
     created_at: "2026-03-15",
   },
 ];
@@ -435,7 +457,8 @@ type RawInvoice = {
   sub_total: number;
   tax: number;
   total: number;
-  due_amount: number;
+  /** Cadena decimal, no entero: ver `dueAmount()`. */
+  due_amount: string;
   /** Lo calcula el servidor: vencida y sin cobrar del todo. */
   overdue: boolean;
   is_credit_note: boolean;
@@ -576,7 +599,7 @@ function invoice(
   dueDate: string,
   customerId: string,
   total: number,
-  dueAmount: number,
+  dueCents: number,
   extra: Partial<RawInvoice> = {},
 ): RawInvoice {
   const customer = CUSTOMERS.find((candidate) => candidate.id === customerId);
@@ -597,7 +620,7 @@ function invoice(
     sub_total: subTotal,
     tax: vat + withholding,
     total,
-    due_amount: dueAmount,
+    due_amount: dueAmount(dueCents),
     overdue: false,
     is_credit_note: false,
     unique_hash: uniqueHash,
@@ -920,7 +943,10 @@ export async function installPimiaMock(
               invoice_number: null,
               status: "DRAFT",
               paid_status: "UNPAID",
-              due_amount: target.total,
+              // `.toFixed(2)` a mano y no la ayuda `dueAmount()`: este cuerpo
+              // se SERIALIZA y corre dentro de la página, donde el ámbito del
+              // módulo no existe. Solo cruzan los argumentos.
+              due_amount: target.total.toFixed(2),
               overdue: false,
               unique_hash: null,
               invoice_pdf_url: null,
@@ -956,8 +982,13 @@ export async function installPimiaMock(
                 },
               };
             }
-            target.due_amount = Math.max(0, target.due_amount - amount);
-            if (target.due_amount === 0) {
+            // La deuda del recurso es una cadena decimal: se lee, se resta en
+            // céntimos y se vuelve a escribir con la forma que manda el
+            // servidor, no con la cómoda. (`.toFixed(2)` a mano: este cuerpo
+            // corre serializado dentro de la página, sin el ámbito del módulo.)
+            const remaining = Math.max(0, Number(target.due_amount) - amount);
+            target.due_amount = remaining.toFixed(2);
+            if (remaining === 0) {
               target.paid_status = "PAID";
               target.status = "COMPLETED";
               target.overdue = false;
