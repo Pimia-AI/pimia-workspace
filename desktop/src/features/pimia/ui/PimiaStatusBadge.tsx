@@ -10,6 +10,10 @@
 import type { ReactNode } from "react";
 
 import type { PimiaEstimateStatus } from "@/features/pimia/api/estimates";
+import type {
+  PimiaInvoicePaidStatus,
+  PimiaInvoiceStatus,
+} from "@/features/pimia/api/invoices";
 import { Badge } from "@/shared/ui/badge";
 import { cn } from "@/shared/lib/cn";
 
@@ -86,6 +90,66 @@ export function PimiaEstimateStatusBadge({ status }: { status: string }) {
   return (
     <PimiaStatusBadge tone={meta?.tone ?? "neutral"}>
       {meta?.label ?? status}
+    </PimiaStatusBadge>
+  );
+}
+
+/**
+ * El ciclo de una factura: DRAFT → PUBLISHED → SENT → VIEWED → COMPLETED.
+ *
+ * PUBLISHED es el escalón que un presupuesto no tiene: número oficial asignado
+ * y registro en VeriFactu. A partir de ahí el documento es irrevocable — por
+ * eso su tono es `info` y no `neutral`: ya no es un papel de trabajo.
+ */
+export const INVOICE_STATUS_META: Record<
+  PimiaInvoiceStatus,
+  { label: string; plural: string; tone: PimiaStatusTone }
+> = {
+  DRAFT: { label: "Borrador", plural: "Borradores", tone: "neutral" },
+  PUBLISHED: { label: "Publicada", plural: "Publicadas", tone: "info" },
+  SENT: { label: "Enviada", plural: "Enviadas", tone: "info" },
+  VIEWED: { label: "Vista", plural: "Vistas", tone: "info" },
+  COMPLETED: { label: "Completada", plural: "Completadas", tone: "success" },
+};
+
+export function PimiaInvoiceStatusBadge({ status }: { status: string }) {
+  const meta = INVOICE_STATUS_META[status as PimiaInvoiceStatus];
+  return (
+    <PimiaStatusBadge tone={meta?.tone ?? "neutral"}>
+      {meta?.label ?? status}
+    </PimiaStatusBadge>
+  );
+}
+
+/**
+ * El eje del cobro, independiente del estado. «Pagada» es verde por la misma
+ * razón por la que «aceptado» lo es; «vencida» manda sobre «pendiente» porque
+ * es la que pide actuar.
+ */
+export const INVOICE_PAID_META: Record<
+  PimiaInvoicePaidStatus,
+  { label: string; tone: PimiaStatusTone }
+> = {
+  UNPAID: { label: "Pendiente", tone: "warning" },
+  PARTIALLY_PAID: { label: "Cobro parcial", tone: "warning" },
+  PAID: { label: "Pagada", tone: "success" },
+};
+
+export function PimiaInvoicePaidBadge({
+  isOverdue,
+  paidStatus,
+}: {
+  /** Lo dice el servidor (`overdue`): vencida y sin cobrar del todo. */
+  isOverdue?: boolean;
+  paidStatus: string;
+}) {
+  if (isOverdue) {
+    return <PimiaStatusBadge tone="danger">Vencida</PimiaStatusBadge>;
+  }
+  const meta = INVOICE_PAID_META[paidStatus as PimiaInvoicePaidStatus];
+  return (
+    <PimiaStatusBadge tone={meta?.tone ?? "neutral"}>
+      {meta?.label ?? paidStatus}
     </PimiaStatusBadge>
   );
 }

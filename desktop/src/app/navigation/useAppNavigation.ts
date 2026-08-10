@@ -124,6 +124,20 @@ export function useAppNavigation() {
     [commitNavigation],
   );
 
+  const goPimiaInvoice = React.useCallback(
+    (invoiceId: string, behavior?: NavigationBehavior) =>
+      commitNavigation(
+        {
+          to: "/pimia/facturas/$invoiceId",
+          params: {
+            invoiceId,
+          },
+        },
+        behavior,
+      ),
+    [commitNavigation],
+  );
+
   const goPulse = React.useCallback(
     (behavior?: NavigationBehavior) =>
       commitNavigation(
@@ -378,6 +392,7 @@ export function useAppNavigation() {
     goPimia,
     goPimiaCustomer,
     goPimiaEstimate,
+    goPimiaInvoice,
     goPimiaPath,
     goProject,
     goProjects,

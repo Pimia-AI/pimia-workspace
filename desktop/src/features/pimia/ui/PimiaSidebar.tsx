@@ -15,7 +15,7 @@
 
 import * as React from "react";
 import { useLocation } from "@tanstack/react-router";
-import { FileText, LayoutDashboard, Users } from "lucide-react";
+import { FileText, LayoutDashboard, Receipt, Users } from "lucide-react";
 
 import { useAppNavigation } from "@/app/navigation/useAppNavigation";
 import {
@@ -66,6 +66,12 @@ const PIMIA_NAV_ENTRIES: PimiaNavEntry[] = [
     label: "Presupuestos",
     path: "/pimia/presupuestos",
     testId: "pimia-nav-estimates",
+  },
+  {
+    icon: Receipt,
+    label: "Facturas",
+    path: "/pimia/facturas",
+    testId: "pimia-nav-invoices",
   },
 ];
 

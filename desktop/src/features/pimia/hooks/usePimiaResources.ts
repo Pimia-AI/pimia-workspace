@@ -27,6 +27,11 @@ import {
   type PimiaEstimateMail,
   type PimiaEstimateManualStatus,
 } from "@/features/pimia/api/estimates";
+import {
+  getInvoice,
+  listInvoices,
+  type ListInvoicesInput,
+} from "@/features/pimia/api/invoices";
 import { useActivePimiaTenant } from "@/features/pimia/hooks/usePimiaAuth";
 
 function dataKey(tenantId: string | undefined, ...rest: unknown[]) {
@@ -72,6 +77,27 @@ export function usePimiaEstimatesQuery(input: ListEstimatesInput = {}) {
     queryFn: () => listEstimates(input),
     enabled: Boolean(tenant),
     placeholderData: (previous) => previous,
+  });
+}
+
+export function usePimiaInvoicesQuery(input: ListInvoicesInput = {}) {
+  const tenant = useActivePimiaTenant();
+
+  return useQuery({
+    queryKey: dataKey(tenant?.id, "invoices", input),
+    queryFn: () => listInvoices(input),
+    enabled: Boolean(tenant),
+    placeholderData: (previous) => previous,
+  });
+}
+
+export function usePimiaInvoiceQuery(invoiceId: string | undefined) {
+  const tenant = useActivePimiaTenant();
+
+  return useQuery({
+    queryKey: dataKey(tenant?.id, "invoice", invoiceId),
+    queryFn: () => getInvoice(invoiceId as string),
+    enabled: Boolean(tenant) && Boolean(invoiceId),
   });
 }
 

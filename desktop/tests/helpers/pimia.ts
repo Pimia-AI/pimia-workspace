@@ -421,6 +421,218 @@ const LINES: Record<string, RawLine[]> = {
   ],
 };
 
+type RawInvoice = {
+  id: string;
+  /** `null` hasta publicar: el número oficial se asigna entonces. */
+  invoice_number: string | null;
+  status: string;
+  paid_status: string;
+  invoice_date: string;
+  due_date: string;
+  customer_id: string;
+  customer: { id: string; name: string };
+  sub_total: number;
+  tax: number;
+  total: number;
+  due_amount: number;
+  /** Lo calcula el servidor: vencida y sin cobrar del todo. */
+  overdue: boolean;
+  is_credit_note: boolean;
+  unique_hash: string | null;
+  invoice_pdf_url: string | null;
+};
+
+/**
+ * Facturas del tenant de reformas, cubriendo lo que un presupuesto no tiene:
+ * borradores SIN número (se asigna al publicar), los dos ejes de estado, una
+ * vencida (`overdue: true`, que lo dice el servidor) y una rectificativa.
+ */
+const INVOICES: RawInvoice[] = [
+  invoice(
+    "91",
+    null,
+    "DRAFT",
+    "UNPAID",
+    "2026-08-08",
+    "2026-09-07",
+    "1",
+    826_600,
+    826_600,
+  ),
+  invoice(
+    "90",
+    "FAC-000058",
+    "SENT",
+    "UNPAID",
+    "2026-08-01",
+    "2026-08-31",
+    "7",
+    1_742_640,
+    1_742_640,
+  ),
+  invoice(
+    "89",
+    "FAC-000057",
+    "VIEWED",
+    "PARTIALLY_PAID",
+    "2026-07-21",
+    "2026-08-20",
+    "3",
+    452_000,
+    152_000,
+  ),
+  invoice(
+    "88",
+    "FAC-000056",
+    "COMPLETED",
+    "PAID",
+    "2026-07-10",
+    "2026-08-09",
+    "1",
+    1_284_500,
+    0,
+  ),
+  // Vencida: due_date pasada y sin cobrar del todo. `overdue` lo manda el
+  // servidor; el mock lo pone a mano igual que lo haría la API.
+  invoice(
+    "87",
+    "FAC-000055",
+    "SENT",
+    "UNPAID",
+    "2026-06-12",
+    "2026-07-12",
+    "4",
+    289_900,
+    289_900,
+    { overdue: true },
+  ),
+  invoice(
+    "86",
+    "FAC-000054",
+    "PUBLISHED",
+    "UNPAID",
+    "2026-08-06",
+    "2026-09-05",
+    "5",
+    118_250,
+    118_250,
+  ),
+  invoice(
+    "85",
+    "FAC-000053",
+    "COMPLETED",
+    "PAID",
+    "2026-06-30",
+    "2026-07-30",
+    "6",
+    76_450,
+    0,
+  ),
+  // Rectificativa: misma tabla, mismo índice, importes en negativo.
+  invoice(
+    "84",
+    "FAC-R-000004",
+    "COMPLETED",
+    "PAID",
+    "2026-06-25",
+    "2026-06-25",
+    "1",
+    -58_900,
+    0,
+    { is_credit_note: true },
+  ),
+  invoice(
+    "83",
+    "FAC-000052",
+    "VIEWED",
+    "UNPAID",
+    "2026-05-18",
+    "2026-06-17",
+    "8",
+    34_000,
+    34_000,
+    { overdue: true },
+  ),
+  invoice(
+    "82",
+    null,
+    "DRAFT",
+    "UNPAID",
+    "2026-05-04",
+    "2026-06-03",
+    "2",
+    240_000,
+    240_000,
+  ),
+];
+
+function invoice(
+  id: string,
+  invoiceNumber: string | null,
+  status: string,
+  paidStatus: string,
+  invoiceDate: string,
+  dueDate: string,
+  customerId: string,
+  total: number,
+  dueAmount: number,
+  extra: Partial<RawInvoice> = {},
+): RawInvoice {
+  const customer = CUSTOMERS.find((candidate) => candidate.id === customerId);
+  const subTotal = Math.round(total / 1.06);
+  const vat = Math.round(subTotal * 0.21);
+  const withholding = -Math.round(subTotal * 0.15);
+  // Sin publicar no hay hash ni PDF: el documento aún no existe hacia fuera.
+  const uniqueHash = invoiceNumber ? `fhash${id}` : null;
+  return {
+    id,
+    invoice_number: invoiceNumber,
+    status,
+    paid_status: paidStatus,
+    invoice_date: invoiceDate,
+    due_date: dueDate,
+    customer_id: customerId,
+    customer: { id: customerId, name: customer?.name ?? "—" },
+    sub_total: subTotal,
+    tax: vat + withholding,
+    total,
+    due_amount: dueAmount,
+    overdue: false,
+    is_credit_note: false,
+    unique_hash: uniqueHash,
+    invoice_pdf_url: uniqueHash
+      ? `${PIMIA_MOCK_TENANT.baseUrl}/invoices/pdf/${uniqueHash}`
+      : null,
+    ...extra,
+  };
+}
+
+/** Las líneas de las facturas con ficha retratada. */
+const INVOICE_LINES: Record<string, RawLine[]> = {
+  "89": [
+    {
+      name: "Reforma de cocina — obra y materiales",
+      description: "Según presupuesto PRE-000131 aceptado.",
+      quantity: 1,
+      unit_name: null,
+      price: 380_000,
+      discount_val: 0,
+      tax: 79_800,
+      total: 380_000,
+    },
+    {
+      name: "Electrodomésticos de sustitución",
+      description: null,
+      quantity: 1,
+      unit_name: null,
+      price: 46_415,
+      discount_val: 0,
+      tax: 9_747,
+      total: 46_415,
+    },
+  ],
+};
+
 export type PimiaMockOptions = {
   /** Sin tenant conectado: la pantalla de bienvenida del ERP. */
   disconnected?: boolean;
@@ -441,7 +653,16 @@ export async function installPimiaMock(
   options: PimiaMockOptions = {},
 ) {
   await page.addInitScript(
-    ({ customers, estimates, lines: LINES, opts, staleScopes, tenant }) => {
+    ({
+      customers,
+      estimates,
+      invoiceLines: INVOICE_LINES,
+      invoices,
+      lines: LINES,
+      opts,
+      staleScopes,
+      tenant,
+    }) => {
       const connected = opts.staleGrant
         ? { ...tenant, scopes: staleScopes }
         : tenant;
@@ -450,6 +671,7 @@ export async function installPimiaMock(
         : { tenants: [connected], activeTenantId: connected.id };
       const allCustomers = opts.empty ? [] : customers;
       const allEstimates = opts.empty ? [] : [...estimates];
+      const allInvoices = opts.empty ? [] : [...invoices];
 
       /**
        * Igual que responde Pimia, con su trampa incluida: el `meta` lleva a la
@@ -715,6 +937,104 @@ export async function installPimiaMock(
           };
         }
 
+        if (clean === "/invoices") {
+          const search = String(query.search ?? "")
+            .trim()
+            .toLowerCase();
+          let rows = allInvoices;
+          if (query.customer_id) {
+            rows = rows.filter(
+              (row) => row.customer_id === String(query.customer_id),
+            );
+          }
+          // `status` acepta además los virtuales del servidor: DUE (con
+          // importe por cobrar) y OVERDUE (vencidas sin cobrar).
+          if (query.status === "DUE") {
+            rows = rows.filter(
+              (row) => row.due_amount > 0 && row.status !== "DRAFT",
+            );
+          } else if (query.status === "OVERDUE") {
+            rows = rows.filter((row) => row.overdue);
+          } else if (query.status) {
+            rows = rows.filter((row) => row.status === String(query.status));
+          }
+          // Eje independiente: se combina con el estado, como en applyFilters.
+          if (query.paid_status) {
+            rows = rows.filter(
+              (row) => row.paid_status === String(query.paid_status),
+            );
+          }
+          if (search) {
+            rows = rows.filter((row) =>
+              `${row.invoice_number ?? ""} ${row.customer.name}`
+                .toLowerCase()
+                .includes(search),
+            );
+          }
+          if (query.from_date && query.to_date) {
+            const from = String(query.from_date);
+            const to = String(query.to_date);
+            rows = rows.filter(
+              (row) => row.invoice_date >= from && row.invoice_date <= to,
+            );
+          }
+          if (query.orderByField) {
+            const field = String(query.orderByField);
+            const direction =
+              String(query.orderBy ?? "desc") === "asc" ? 1 : -1;
+            rows = [...rows].sort(
+              (a, b) =>
+                direction *
+                compare(
+                  (a as unknown as Record<string, unknown>)[field],
+                  (b as unknown as Record<string, unknown>)[field],
+                ),
+            );
+          }
+          return listPayload(rows, allInvoices, "invoice_total_count", query);
+        }
+
+        if (clean.startsWith("/invoices/")) {
+          const id = decodeURIComponent(clean.slice("/invoices/".length));
+          const found = allInvoices.find((entry) => entry.id === id);
+          if (!found) {
+            return null;
+          }
+          const owner = allCustomers.find(
+            (candidate) => candidate.id === found.customer_id,
+          );
+          return {
+            data: {
+              ...found,
+              reference_number: found.invoice_number
+                ? `OBRA-${found.id}`
+                : null,
+              notes:
+                "Pago por transferencia a la cuenta indicada en el PDF. IVA y retención según normativa vigente.",
+              customer: owner ?? found.customer,
+              items: (INVOICE_LINES[found.id] ?? []).map((line, index) => ({
+                ...line,
+                id: `${found.id}-${index + 1}`,
+                invoice_id: found.id,
+                taxes: [
+                  {
+                    id: `${found.id}-${index + 1}-iva`,
+                    name: "IVA 21%",
+                    percent: 21,
+                    amount: Math.round(line.total * 0.21),
+                  },
+                  {
+                    id: `${found.id}-${index + 1}-irpf`,
+                    name: "IRPF -15%",
+                    percent: -15,
+                    amount: -Math.round(line.total * 0.15),
+                  },
+                ],
+              })),
+            },
+          };
+        }
+
         if (clean === "/next-number") {
           return { next_number: "PRE-000134" };
         }
@@ -795,6 +1115,8 @@ export async function installPimiaMock(
     {
       customers: CUSTOMERS,
       estimates: ESTIMATES,
+      invoiceLines: INVOICE_LINES,
+      invoices: INVOICES,
       lines: LINES,
       opts: {
         disconnected: options.disconnected ?? false,
