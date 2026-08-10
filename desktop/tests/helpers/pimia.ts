@@ -31,6 +31,7 @@ export const PIMIA_MOCK_TENANT = {
     "estimates:write",
     "invoices:write",
     "items:read",
+    "payments:write",
   ],
   connectedAt: 1_770_000_000_000,
   expiresAt: 1_770_003_600_000,

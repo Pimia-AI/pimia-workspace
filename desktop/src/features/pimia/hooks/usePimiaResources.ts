@@ -13,7 +13,10 @@ import {
   listCustomers,
   type ListCustomersInput,
 } from "@/features/pimia/api/customers";
-import { fetchEstimateMailBody } from "@/features/pimia/api/company";
+import {
+  fetchEstimateMailBody,
+  fetchInvoiceMailBody,
+} from "@/features/pimia/api/company";
 import {
   changeEstimateStatus,
   cloneEstimate,
@@ -28,9 +31,16 @@ import {
   type PimiaEstimateManualStatus,
 } from "@/features/pimia/api/estimates";
 import {
+  cloneInvoice,
   getInvoice,
   listInvoices,
+  markInvoiceSent,
+  publishInvoice,
+  recordInvoicePayment,
+  sendInvoice,
   type ListInvoicesInput,
+  type PimiaInvoiceMail,
+  type PimiaInvoicePaymentDraft,
 } from "@/features/pimia/api/invoices";
 import { useActivePimiaTenant } from "@/features/pimia/hooks/usePimiaAuth";
 
@@ -182,6 +192,59 @@ export function useSendPimiaEstimate() {
       sendEstimate(input.estimateId, input.mail),
     // Enviar mueve el estado del borrador a «enviado», así que la ficha y la
     // lista tienen que releerse igual que con un cambio de estado a mano.
+    onSuccess: invalidate,
+  });
+}
+
+export function usePimiaInvoiceMailBodyQuery(enabled: boolean) {
+  const tenant = useActivePimiaTenant();
+
+  return useQuery({
+    queryKey: dataKey(tenant?.id, "invoiceMailBody"),
+    queryFn: () => fetchInvoiceMailBody(),
+    enabled: Boolean(tenant) && enabled,
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
+export function usePublishPimiaInvoice() {
+  const invalidate = useInvalidateTenantData();
+  return useMutation({
+    mutationFn: (invoiceId: string) => publishInvoice(invoiceId),
+    onSuccess: invalidate,
+  });
+}
+
+export function useMarkPimiaInvoiceSent() {
+  const invalidate = useInvalidateTenantData();
+  return useMutation({
+    mutationFn: (invoiceId: string) => markInvoiceSent(invoiceId),
+    onSuccess: invalidate,
+  });
+}
+
+export function useSendPimiaInvoice() {
+  const invalidate = useInvalidateTenantData();
+  return useMutation({
+    mutationFn: (input: { invoiceId: string; mail: PimiaInvoiceMail }) =>
+      sendInvoice(input.invoiceId, input.mail),
+    onSuccess: invalidate,
+  });
+}
+
+export function useClonePimiaInvoice() {
+  const invalidate = useInvalidateTenantData();
+  return useMutation({
+    mutationFn: (invoiceId: string) => cloneInvoice(invoiceId),
+    onSuccess: invalidate,
+  });
+}
+
+export function useRecordPimiaInvoicePayment() {
+  const invalidate = useInvalidateTenantData();
+  return useMutation({
+    mutationFn: (draft: PimiaInvoicePaymentDraft) =>
+      recordInvoicePayment(draft),
     onSuccess: invalidate,
   });
 }

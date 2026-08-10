@@ -25,6 +25,15 @@ import { pimiaRequest } from "@/features/pimia/api/pimiaClient";
  * blanco en vez de inventarse un texto que la empresa no ha escrito.
  */
 export async function fetchEstimateMailBody(): Promise<string | null> {
+  return fetchMailBody("estimate_mail_body");
+}
+
+/** La de facturas, del mismo sitio y por la misma razón de permisos. */
+export async function fetchInvoiceMailBody(): Promise<string | null> {
+  return fetchMailBody("invoice_mail_body");
+}
+
+async function fetchMailBody(key: string): Promise<string | null> {
   const payload = await pimiaRequest<unknown>({ path: "/bootstrap" });
 
   if (typeof payload !== "object" || payload === null) {
@@ -38,7 +47,7 @@ export async function fetchEstimateMailBody(): Promise<string | null> {
     return null;
   }
 
-  const body = (settings as Record<string, unknown>).estimate_mail_body;
+  const body = (settings as Record<string, unknown>)[key];
   if (typeof body !== "string") {
     return null;
   }
