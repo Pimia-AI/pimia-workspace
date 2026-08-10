@@ -220,6 +220,38 @@ Dos trampas comprobadas contra la API real:
   **del paginador**; aquel solo vale para «cuántos hay en total». Está aislado
   en `readCompanyCount()` con el aviso puesto.
 
+## La réplica de facturas
+
+Las pantallas de facturas (`PimiaInvoicesScreen`, `PimiaInvoiceScreen`,
+`PimiaInvoiceList`) son el molde de presupuestos aplicado, en el mismo orden:
+**primero las vistas, las acciones en su propio pase**. Lo que una factura
+tiene y un presupuesto no, y cómo lo enseña la UI:
+
+- ⛔ **Un borrador NO tiene número.** `invoice_number` se asigna al **publicar**
+  (`ChangeInvoiceStatusController`), que además registra la factura en
+  VeriFactu/AEAT y descuenta stock. La lista dice «Sin numerar» y la ficha
+  titula «Borrador» — no se finge un identificador que aún no existe. Marcar
+  como enviada un borrador **publica primero** (auto-publish del controlador).
+- **Dos ejes de estado, dos insignias.** `status` (borrador → publicada →
+  enviada → vista → completada) y `paid_status` (pendiente → parcial → pagada)
+  son independientes; en la API se filtran por claves distintas y **se
+  combinan** (pestañas para el estado, un `Select` para el cobro). A un
+  borrador no se le pinta insignia de cobro: no se le debe nada.
+- **`DUE` y `OVERDUE` son filtros virtuales del servidor** (valores de
+  `status`): las cifras de «pendientes» y «vencidas» salen de ahí, y el
+  vencimiento no se recalcula en el cliente — `overdue` viene del recurso.
+- **El desglose termina en «Pendiente de cobro»** (`due_amount`), que es la
+  pregunta de una factura. Solo cuando la deuda no es ni cero ni el total:
+  en esos dos casos el total y la insignia ya lo dicen.
+- **Las rectificativas** (`is_credit_note`) viven en el mismo índice: se
+  señalan junto al número, con sus importes en negativo tal como llegan.
+- ⚖️ **Sin borrar, y aquí ni entrará para emitidas**: una factura emitida no se
+  borra, se rectifica. Si algún día entra, será solo para borradores.
+
+Los impuestos y las líneas tienen la misma forma de cable que en presupuestos:
+`api/invoices.ts` reutiliza los normalizadores de `api/estimates.ts` — las
+trampas del IVA + IRPF viven en un solo sitio.
+
 ## Los ladrillos
 
 Viven en `desktop/src/features/pimia/ui/`. Son los primeros del registro que la

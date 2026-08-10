@@ -126,7 +126,7 @@ export type PimiaEstimateSortField = (typeof ESTIMATE_SORT_FIELDS)[number];
 
 type RawEstimate = Record<string, unknown>;
 
-function text(value: unknown): string | null {
+export function text(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
   }
@@ -158,7 +158,7 @@ function readPercent(value: unknown): number | null {
   return null;
 }
 
-function normalizeTaxes(value: unknown): PimiaEstimateTax[] | null {
+export function normalizeTaxes(value: unknown): PimiaEstimateTax[] | null {
   if (!Array.isArray(value)) {
     return null;
   }
@@ -173,7 +173,7 @@ function normalizeTaxes(value: unknown): PimiaEstimateTax[] | null {
   });
 }
 
-function normalizeLine(raw: Record<string, unknown>): PimiaEstimateLine {
+export function normalizeLine(raw: Record<string, unknown>): PimiaEstimateLine {
   return {
     id: String(raw.id ?? ""),
     name: text(raw.name) ?? "(sin concepto)",

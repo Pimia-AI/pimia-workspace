@@ -16,10 +16,12 @@ import { Route as indexRouteImport } from "./routes/index";
 import { Route as workflowsDotworkflowIdRouteImport } from "./routes/workflows.$workflowId";
 import { Route as projectsDotprojectIdRouteImport } from "./routes/projects.$projectId";
 import { Route as pimiaDotpresupuestosRouteImport } from "./routes/pimia.presupuestos";
+import { Route as pimiaDotfacturasRouteImport } from "./routes/pimia.facturas";
 import { Route as pimiaDotclientesRouteImport } from "./routes/pimia.clientes";
 import { Route as messagesDotnewRouteImport } from "./routes/messages.new";
 import { Route as channelsDotchannelIdRouteImport } from "./routes/channels.$channelId";
 import { Route as pimiaDotpresupuestosDotestimateIdRouteImport } from "./routes/pimia.presupuestos.$estimateId";
+import { Route as pimiaDotfacturasDotinvoiceIdRouteImport } from "./routes/pimia.facturas.$invoiceId";
 import { Route as pimiaDotclientesDotcustomerIdRouteImport } from "./routes/pimia.clientes.$customerId";
 import { Route as channelsDotchannelIdDotpostsDotpostIdRouteImport } from "./routes/channels.$channelId.posts.$postId";
 
@@ -78,6 +80,11 @@ const pimiaDotpresupuestosRoute = pimiaDotpresupuestosRouteImport.update({
   path: "/pimia/presupuestos",
   getParentRoute: () => rootRouteImport,
 } as any);
+const pimiaDotfacturasRoute = pimiaDotfacturasRouteImport.update({
+  id: "/pimia/facturas",
+  path: "/pimia/facturas",
+  getParentRoute: () => rootRouteImport,
+} as any);
 const pimiaDotclientesRoute = pimiaDotclientesRouteImport.update({
   id: "/pimia/clientes",
   path: "/pimia/clientes",
@@ -97,6 +104,12 @@ const pimiaDotpresupuestosDotestimateIdRoute =
   pimiaDotpresupuestosDotestimateIdRouteImport.update({
     id: "/pimia/presupuestos/$estimateId",
     path: "/pimia/presupuestos/$estimateId",
+    getParentRoute: () => rootRouteImport,
+  } as any);
+const pimiaDotfacturasDotinvoiceIdRoute =
+  pimiaDotfacturasDotinvoiceIdRouteImport.update({
+    id: "/pimia/facturas/$invoiceId",
+    path: "/pimia/facturas/$invoiceId",
     getParentRoute: () => rootRouteImport,
   } as any);
 const pimiaDotclientesDotcustomerIdRoute =
@@ -124,10 +137,12 @@ export interface FileRoutesByFullPath {
   "/channels/$channelId": typeof channelsDotchannelIdRoute;
   "/messages/new": typeof messagesDotnewRoute;
   "/pimia/clientes": typeof pimiaDotclientesRoute;
+  "/pimia/facturas": typeof pimiaDotfacturasRoute;
   "/pimia/presupuestos": typeof pimiaDotpresupuestosRoute;
   "/projects/$projectId": typeof projectsDotprojectIdRoute;
   "/workflows/$workflowId": typeof workflowsDotworkflowIdRoute;
   "/pimia/clientes/$customerId": typeof pimiaDotclientesDotcustomerIdRoute;
+  "/pimia/facturas/$invoiceId": typeof pimiaDotfacturasDotinvoiceIdRoute;
   "/pimia/presupuestos/$estimateId": typeof pimiaDotpresupuestosDotestimateIdRoute;
   "/channels/$channelId/posts/$postId": typeof channelsDotchannelIdDotpostsDotpostIdRoute;
 }
@@ -143,10 +158,12 @@ export interface FileRoutesByTo {
   "/channels/$channelId": typeof channelsDotchannelIdRoute;
   "/messages/new": typeof messagesDotnewRoute;
   "/pimia/clientes": typeof pimiaDotclientesRoute;
+  "/pimia/facturas": typeof pimiaDotfacturasRoute;
   "/pimia/presupuestos": typeof pimiaDotpresupuestosRoute;
   "/projects/$projectId": typeof projectsDotprojectIdRoute;
   "/workflows/$workflowId": typeof workflowsDotworkflowIdRoute;
   "/pimia/clientes/$customerId": typeof pimiaDotclientesDotcustomerIdRoute;
+  "/pimia/facturas/$invoiceId": typeof pimiaDotfacturasDotinvoiceIdRoute;
   "/pimia/presupuestos/$estimateId": typeof pimiaDotpresupuestosDotestimateIdRoute;
   "/channels/$channelId/posts/$postId": typeof channelsDotchannelIdDotpostsDotpostIdRoute;
 }
@@ -163,10 +180,12 @@ export interface FileRoutesById {
   "/channels/$channelId": typeof channelsDotchannelIdRoute;
   "/messages/new": typeof messagesDotnewRoute;
   "/pimia/clientes": typeof pimiaDotclientesRoute;
+  "/pimia/facturas": typeof pimiaDotfacturasRoute;
   "/pimia/presupuestos": typeof pimiaDotpresupuestosRoute;
   "/projects/$projectId": typeof projectsDotprojectIdRoute;
   "/workflows/$workflowId": typeof workflowsDotworkflowIdRoute;
   "/pimia/clientes/$customerId": typeof pimiaDotclientesDotcustomerIdRoute;
+  "/pimia/facturas/$invoiceId": typeof pimiaDotfacturasDotinvoiceIdRoute;
   "/pimia/presupuestos/$estimateId": typeof pimiaDotpresupuestosDotestimateIdRoute;
   "/channels/$channelId/posts/$postId": typeof channelsDotchannelIdDotpostsDotpostIdRoute;
 }
@@ -184,10 +203,12 @@ export interface FileRouteTypes {
     | "/channels/$channelId"
     | "/messages/new"
     | "/pimia/clientes"
+    | "/pimia/facturas"
     | "/pimia/presupuestos"
     | "/projects/$projectId"
     | "/workflows/$workflowId"
     | "/pimia/clientes/$customerId"
+    | "/pimia/facturas/$invoiceId"
     | "/pimia/presupuestos/$estimateId"
     | "/channels/$channelId/posts/$postId";
   fileRoutesByTo: FileRoutesByTo;
@@ -203,10 +224,12 @@ export interface FileRouteTypes {
     | "/channels/$channelId"
     | "/messages/new"
     | "/pimia/clientes"
+    | "/pimia/facturas"
     | "/pimia/presupuestos"
     | "/projects/$projectId"
     | "/workflows/$workflowId"
     | "/pimia/clientes/$customerId"
+    | "/pimia/facturas/$invoiceId"
     | "/pimia/presupuestos/$estimateId"
     | "/channels/$channelId/posts/$postId";
   id:
@@ -222,10 +245,12 @@ export interface FileRouteTypes {
     | "/channels/$channelId"
     | "/messages/new"
     | "/pimia/clientes"
+    | "/pimia/facturas"
     | "/pimia/presupuestos"
     | "/projects/$projectId"
     | "/workflows/$workflowId"
     | "/pimia/clientes/$customerId"
+    | "/pimia/facturas/$invoiceId"
     | "/pimia/presupuestos/$estimateId"
     | "/channels/$channelId/posts/$postId";
   fileRoutesById: FileRoutesById;
@@ -242,10 +267,12 @@ export interface RootRouteChildren {
   channelsDotchannelIdRoute: typeof channelsDotchannelIdRoute;
   messagesDotnewRoute: typeof messagesDotnewRoute;
   pimiaDotclientesRoute: typeof pimiaDotclientesRoute;
+  pimiaDotfacturasRoute: typeof pimiaDotfacturasRoute;
   pimiaDotpresupuestosRoute: typeof pimiaDotpresupuestosRoute;
   projectsDotprojectIdRoute: typeof projectsDotprojectIdRoute;
   workflowsDotworkflowIdRoute: typeof workflowsDotworkflowIdRoute;
   pimiaDotclientesDotcustomerIdRoute: typeof pimiaDotclientesDotcustomerIdRoute;
+  pimiaDotfacturasDotinvoiceIdRoute: typeof pimiaDotfacturasDotinvoiceIdRoute;
   pimiaDotpresupuestosDotestimateIdRoute: typeof pimiaDotpresupuestosDotestimateIdRoute;
   channelsDotchannelIdDotpostsDotpostIdRoute: typeof channelsDotchannelIdDotpostsDotpostIdRoute;
 }
@@ -329,6 +356,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof pimiaDotpresupuestosRouteImport;
       parentRoute: typeof rootRouteImport;
     };
+    "/pimia/facturas": {
+      id: "/pimia/facturas";
+      path: "/pimia/facturas";
+      fullPath: "/pimia/facturas";
+      preLoaderRoute: typeof pimiaDotfacturasRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     "/pimia/clientes": {
       id: "/pimia/clientes";
       path: "/pimia/clientes";
@@ -355,6 +389,13 @@ declare module "@tanstack/react-router" {
       path: "/pimia/presupuestos/$estimateId";
       fullPath: "/pimia/presupuestos/$estimateId";
       preLoaderRoute: typeof pimiaDotpresupuestosDotestimateIdRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/pimia/facturas/$invoiceId": {
+      id: "/pimia/facturas/$invoiceId";
+      path: "/pimia/facturas/$invoiceId";
+      fullPath: "/pimia/facturas/$invoiceId";
+      preLoaderRoute: typeof pimiaDotfacturasDotinvoiceIdRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/pimia/clientes/$customerId": {
@@ -386,10 +427,12 @@ const rootRouteChildren: RootRouteChildren = {
   channelsDotchannelIdRoute: channelsDotchannelIdRoute,
   messagesDotnewRoute: messagesDotnewRoute,
   pimiaDotclientesRoute: pimiaDotclientesRoute,
+  pimiaDotfacturasRoute: pimiaDotfacturasRoute,
   pimiaDotpresupuestosRoute: pimiaDotpresupuestosRoute,
   projectsDotprojectIdRoute: projectsDotprojectIdRoute,
   workflowsDotworkflowIdRoute: workflowsDotworkflowIdRoute,
   pimiaDotclientesDotcustomerIdRoute: pimiaDotclientesDotcustomerIdRoute,
+  pimiaDotfacturasDotinvoiceIdRoute: pimiaDotfacturasDotinvoiceIdRoute,
   pimiaDotpresupuestosDotestimateIdRoute:
     pimiaDotpresupuestosDotestimateIdRoute,
   channelsDotchannelIdDotpostsDotpostIdRoute:

@@ -99,6 +99,44 @@ test("la ficha de un presupuesto en oscuro", async ({ page }) => {
   await shoot(page, "presupuesto-ficha-oscuro");
 });
 
+test("la lista de facturas", async ({ page }) => {
+  await boot(page);
+  await page.getByTestId("pimia-nav-invoices").click();
+  await expect(page.getByTestId("pimia-invoice-list")).toBeVisible();
+  // Un borrador no tiene número y no lo finge.
+  await expect(page.getByTestId("pimia-invoice-91")).toContainText(
+    "Sin numerar",
+  );
+  await shoot(page, "facturas");
+});
+
+test("la lista de facturas en oscuro", async ({ page }) => {
+  await boot(page, { theme: "buzz-dark" });
+  await page.getByTestId("pimia-nav-invoices").click();
+  await expect(page.getByTestId("pimia-invoice-list")).toBeVisible();
+  await shoot(page, "facturas-oscuro");
+});
+
+test("la ficha de una factura", async ({ page }) => {
+  await boot(page);
+  await page.getByTestId("pimia-nav-invoices").click();
+  await page.getByTestId("pimia-invoice-open-89").click();
+  await expect(page.getByTestId("pimia-invoice-lines")).toBeVisible();
+  // Cobro parcial: el desglose termina en lo pendiente.
+  await expect(page.getByText("Pendiente de cobro")).toBeVisible();
+  await shoot(page, "factura-ficha");
+});
+
+test("la ficha de una factura borrador", async ({ page }) => {
+  await boot(page);
+  await page.getByTestId("pimia-nav-invoices").click();
+  await page.getByTestId("pimia-invoice-open-91").click();
+  // Sin número hasta publicar: el título lo dice en vez de fingirlo.
+  await expect(page.getByRole("heading", { name: "Borrador" })).toBeVisible();
+  await expect(page.getByText("Se asigna al publicar")).toBeVisible();
+  await shoot(page, "factura-borrador");
+});
+
 test("los presupuestos sin nada que enseñar", async ({ page }) => {
   await boot(page, { empty: true });
   await page.getByTestId("pimia-nav-estimates").click();
