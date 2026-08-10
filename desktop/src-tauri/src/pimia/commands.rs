@@ -144,7 +144,6 @@ pub(crate) fn pimia_connect_phase(login: tauri::State<'_, PimiaLoginState>) -> L
 #[tauri::command]
 pub(crate) async fn pimia_disconnect_tenant(
     app: tauri::AppHandle,
-    app_state: tauri::State<'_, crate::app_state::AppState>,
     tenant_id: String,
 ) -> Result<PimiaAuthStatus, String> {
     let mut store = vault::load_vault()?;
@@ -156,7 +155,7 @@ pub(crate) async fn pimia_disconnect_tenant(
     let status = status_from(&store);
     announce(&app, &status);
 
-    let client = app_state.http_client.clone();
+    let client = api::http_client().clone();
     if let Some(refresh_token) = tenant.tokens.refresh_token.as_deref() {
         if let Ok(metadata) = oauth::fetch_metadata(&client, &tenant.base_url).await {
             if let Err(error) =
@@ -181,12 +180,11 @@ pub(crate) struct ConnectTenantInput {
 #[tauri::command]
 pub(crate) async fn pimia_connect_tenant(
     app: tauri::AppHandle,
-    app_state: tauri::State<'_, crate::app_state::AppState>,
     login: tauri::State<'_, PimiaLoginState>,
     input: ConnectTenantInput,
 ) -> Result<PimiaAuthStatus, String> {
     let base_url = vault::normalize_base_url(&input.base_url)?;
-    let client = app_state.http_client.clone();
+    let client = api::http_client().clone();
     let metadata = oauth::fetch_metadata(&client, &base_url).await?;
     let scopes = oauth::negotiate_scopes(&metadata);
 
@@ -310,7 +308,6 @@ pub(crate) struct ApiRequestInput {
 
 #[tauri::command]
 pub(crate) async fn pimia_api_request(
-    app_state: tauri::State<'_, crate::app_state::AppState>,
     input: ApiRequestInput,
 ) -> Result<serde_json::Value, PimiaApiError> {
     let tenant_id = match input.tenant_id {
@@ -323,6 +320,6 @@ pub(crate) async fn pimia_api_request(
             })?,
     };
 
-    let client = app_state.http_client.clone();
+    let client = api::http_client().clone();
     api::request(&client, &tenant_id, input.request).await
 }

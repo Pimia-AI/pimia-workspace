@@ -52,6 +52,18 @@ function dataKey(tenantId: string | undefined, ...rest: unknown[]) {
   return ["pimia", "data", tenantId ?? "none", ...rest] as const;
 }
 
+/**
+ * Cuánto vale lo ya leído al volver a montar una pantalla.
+ *
+ * Con el `staleTime: 0` por defecto, cada cambio de pantalla repetía la ráfaga
+ * entera (lista + recuentos: 4-5 peticiones, cada una un RTT al tenant). Son
+ * datos de un solo usuario editando, y toda escritura desde la app invalida el
+ * tenant entero (`useInvalidateTenantData`), que refetchea aunque nada esté
+ * stale — así que lo único que se pospone hasta 30 s es ver cambios hechos
+ * desde fuera (la web, un agente).
+ */
+const DATA_STALE_TIME = 30 * 1000;
+
 export function usePimiaCustomersQuery(input: ListCustomersInput = {}) {
   const tenant = useActivePimiaTenant();
 
@@ -60,6 +72,7 @@ export function usePimiaCustomersQuery(input: ListCustomersInput = {}) {
     queryFn: () => listCustomers(input),
     enabled: Boolean(tenant),
     placeholderData: (previous) => previous,
+    staleTime: DATA_STALE_TIME,
   });
 }
 
@@ -70,6 +83,7 @@ export function usePimiaCustomerQuery(customerId: string | undefined) {
     queryKey: dataKey(tenant?.id, "customer", customerId),
     queryFn: () => getCustomer(customerId as string),
     enabled: Boolean(tenant) && Boolean(customerId),
+    staleTime: DATA_STALE_TIME,
   });
 }
 
@@ -80,6 +94,7 @@ export function usePimiaEstimateQuery(estimateId: string | undefined) {
     queryKey: dataKey(tenant?.id, "estimate", estimateId),
     queryFn: () => getEstimate(estimateId as string),
     enabled: Boolean(tenant) && Boolean(estimateId),
+    staleTime: DATA_STALE_TIME,
   });
 }
 
@@ -91,6 +106,7 @@ export function usePimiaEstimatesQuery(input: ListEstimatesInput = {}) {
     queryFn: () => listEstimates(input),
     enabled: Boolean(tenant),
     placeholderData: (previous) => previous,
+    staleTime: DATA_STALE_TIME,
   });
 }
 
@@ -102,6 +118,7 @@ export function usePimiaInvoicesQuery(input: ListInvoicesInput = {}) {
     queryFn: () => listInvoices(input),
     enabled: Boolean(tenant),
     placeholderData: (previous) => previous,
+    staleTime: DATA_STALE_TIME,
   });
 }
 
@@ -112,6 +129,7 @@ export function usePimiaInvoiceQuery(invoiceId: string | undefined) {
     queryKey: dataKey(tenant?.id, "invoice", invoiceId),
     queryFn: () => getInvoice(invoiceId as string),
     enabled: Boolean(tenant) && Boolean(invoiceId),
+    staleTime: DATA_STALE_TIME,
   });
 }
 

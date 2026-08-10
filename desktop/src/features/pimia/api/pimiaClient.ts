@@ -106,10 +106,19 @@ export type PimiaRequestInput = {
 };
 
 export async function pimiaRequest<T>(input: PimiaRequestInput): Promise<T> {
+  // Tiempo del invoke completo (IPC + Rust + HTTP), en verbose y solo en dev.
+  // El desglose de la parte Rust lo da `PIMIA_TIMING=1` (api.rs).
+  const started = import.meta.env.DEV ? performance.now() : 0;
   try {
     return (await invoke("pimia_api_request", { input })) as T;
   } catch (error) {
     throw toPimiaApiError(error);
+  } finally {
+    if (import.meta.env.DEV) {
+      console.debug(
+        `pimia ${input.method ?? "GET"} ${input.path}: ${Math.round(performance.now() - started)}ms`,
+      );
+    }
   }
 }
 

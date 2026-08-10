@@ -25,6 +25,35 @@ use crate::pimia::{
 /// canjearían el mismo refresh token, y para el servidor eso es un reuse.
 static REFRESH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+/// El cliente HTTP del ERP, uno por proceso (como `REFRESH_LOCK`: estado del
+/// módulo, no de `AppState` — el pool agrupa por host y vale para todos los
+/// tenants a la vez).
+///
+/// No sirve el `http_client` global de la app: está afinado para el relay en
+/// localhost (`pool_max_idle_per_host(1)`, idle 10 s), y contra el tenant
+/// remoto eso obligaba a pagar el handshake TCP+TLS (~200 ms medidos, RTT
+/// ~85 ms) en casi cada navegación. Este pool retiene la conexión y la
+/// mantiene viva con pings h2 mientras la app está abierta, de modo que la
+/// ráfaga de queries de cada pantalla viaja multiplexada por una conexión ya
+/// caliente.
+pub(crate) fn http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            // Como en el cliente global: un tenant de desarrollo va por
+            // `http://localhost` y tiene que resolver al loopback IPv4.
+            .resolve("localhost", std::net::SocketAddr::from(([127, 0, 0, 1], 0)))
+            .pool_idle_timeout(std::time::Duration::from_secs(300))
+            .pool_max_idle_per_host(4)
+            .http2_keep_alive_interval(std::time::Duration::from_secs(30))
+            .http2_keep_alive_while_idle(true)
+            .http2_keep_alive_timeout(std::time::Duration::from_secs(10))
+            .tcp_keepalive(std::time::Duration::from_secs(60))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
+
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 const MAX_RATE_LIMIT_RETRIES: u32 = 2;
 const MAX_RETRY_DELAY_MS: u64 = 30_000;
@@ -159,7 +188,9 @@ pub(crate) async fn request(
     tenant_id: &str,
     input: PimiaRequest,
 ) -> Result<serde_json::Value, PimiaApiError> {
+    let token_started = std::time::Instant::now();
     let (tenant, mut access_token) = ensure_access_token(client, tenant_id).await?;
+    let token_elapsed = token_started.elapsed();
     let url = build_url(&tenant.base_url, &input.path, input.query.as_ref())?;
     let method = parse_method(input.method.as_deref())?;
 
@@ -176,9 +207,17 @@ pub(crate) async fn request(
             builder = builder.json(body);
         }
 
+        let http_started = std::time::Instant::now();
         let response = builder.send().await.map_err(|error| {
             PimiaApiError::new("network", format!("Pimia no respondió: {error}"))
         })?;
+        log_timing(
+            &method,
+            &url,
+            &response,
+            token_elapsed,
+            http_started.elapsed(),
+        );
 
         let status = response.status();
         if status.is_success() {
@@ -208,6 +247,32 @@ pub(crate) async fn request(
 
         return Err(classify_error(status, &body));
     }
+}
+
+/// Tiempos por petición, opt-in con `PIMIA_TIMING=1` en el entorno (stderr).
+///
+/// `token` es lo que costó materializar el access token (llavero + candado, y
+/// el refresco entero si tocaba); `http` es solo el viaje de esta petición.
+/// La versión dice si el tenant negoció h2. Se imprime el path sin la query:
+/// la query puede llevar términos de búsqueda del usuario.
+fn log_timing(
+    method: &reqwest::Method,
+    url: &url::Url,
+    response: &reqwest::Response,
+    token_elapsed: std::time::Duration,
+    http_elapsed: std::time::Duration,
+) {
+    if std::env::var_os("PIMIA_TIMING").is_none() {
+        return;
+    }
+    eprintln!(
+        "pimia-timing: {method} {path} -> {status} {version:?} token={token_ms}ms http={http_ms}ms",
+        path = url.path(),
+        status = response.status().as_u16(),
+        version = response.version(),
+        token_ms = token_elapsed.as_millis(),
+        http_ms = http_elapsed.as_millis(),
+    );
 }
 
 async fn parse_success_body(
