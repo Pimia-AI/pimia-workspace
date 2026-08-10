@@ -5,6 +5,12 @@
  * caso normal; se puede bajar para un cobro parcial. El `payment_number` no se
  * pide: lo genera el servidor con su serie, y `paid_status`/`due_amount` los
  * recalcula él — aquí no hay aritmética de deuda.
+ *
+ * ⚖️ **El tope de esta pantalla es una cortesía, no la garantía.** Quien impide
+ * el sobrepago de verdad es el servidor (`PaymentRequest`, con un 422 que dice
+ * exactamente eso), y así debe ser. Lo de aquí sirve para avisar antes de gastar
+ * un viaje — y por eso, cuando no puede saber el tope, **lo dice** en vez de
+ * callarse: ver `lib/payments.ts`.
  */
 
 import * as React from "react";
@@ -14,6 +20,7 @@ import type { PimiaInvoice } from "@/features/pimia/api/invoices";
 import { PimiaApiError } from "@/features/pimia/api/pimiaClient";
 import { useRecordPimiaInvoicePayment } from "@/features/pimia/hooks/usePimiaResources";
 import { formatCents, parseAmountToCents } from "@/features/pimia/lib/money";
+import { exceedsCeiling, paymentCeiling } from "@/features/pimia/lib/payments";
 import { Button } from "@/shared/ui/button";
 import {
   Dialog,
@@ -60,14 +67,12 @@ export function PimiaInvoicePaymentDialog({
   }, [invoice.dueCents, open]);
 
   const amountCents = parseAmountToCents(amount);
-  const exceedsDue =
-    amountCents !== null &&
-    invoice.dueCents !== null &&
-    amountCents > invoice.dueCents;
+  const ceiling = paymentCeiling(invoice.dueCents, invoice.totalCents);
+  const exceeds = exceedsCeiling(amountCents, ceiling);
   const canRecord =
     amountCents !== null &&
     amountCents > 0 &&
-    !exceedsDue &&
+    !exceeds &&
     date !== "" &&
     Boolean(invoice.customerId) &&
     !record.isPending;
@@ -111,9 +116,9 @@ export function PimiaInvoicePaymentDialog({
               </span>
             </DialogTitle>
             <DialogDescription>
-              {invoice.dueCents !== null
-                ? `Pendiente: ${formatCents(invoice.dueCents)}. `
-                : null}
+              {ceiling.source === "due"
+                ? `Pendiente: ${formatCents(ceiling.cents)}. `
+                : "No se ha podido leer lo pendiente de esta factura. "}
               Pimia asigna el número de recibo y recalcula la deuda al guardar.
             </DialogDescription>
           </DialogHeader>
@@ -132,10 +137,35 @@ export function PimiaInvoicePaymentDialog({
                 value={amount}
               />
             </label>
-            {exceedsDue ? (
-              <p className="-mt-2 text-xs text-destructive" role="alert">
+            {exceeds && ceiling.source === "due" ? (
+              <p
+                className="-mt-2 text-xs text-destructive"
+                data-testid="pimia-payment-over-due"
+                role="alert"
+              >
                 Es más de lo pendiente: cobra como mucho{" "}
-                {formatCents(invoice.dueCents ?? 0)}.
+                {formatCents(ceiling.cents)}.
+              </p>
+            ) : null}
+            {exceeds && ceiling.source === "total" ? (
+              <p
+                className="-mt-2 text-xs text-destructive"
+                data-testid="pimia-payment-over-total"
+                role="alert"
+              >
+                Es más que el total de la factura ({formatCents(ceiling.cents)}
+                ). Como no se pudo leer lo pendiente, el tope de verdad lo pone
+                Pimia al guardar.
+              </p>
+            ) : null}
+            {ceiling.source === "unknown" ? (
+              <p
+                className="-mt-2 text-xs text-muted-foreground"
+                data-testid="pimia-payment-no-ceiling"
+              >
+                Aquí no se comprueba cuánto queda pendiente porque no se ha
+                podido leer. Pimia lo comprueba al guardar y avisa si el importe
+                se pasa.
               </p>
             ) : null}
 

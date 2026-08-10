@@ -272,8 +272,20 @@ menú), y el cuidado es proporcional a lo que cuesta deshacer.
 - **Registrar cobro** escribe en el dominio `payments` (decisión 👤 2026-08-10:
   entra con el scope ya en `REQUESTED_SCOPES`). El `payment_number` no se pide
   —lo genera el servidor, sin carrera— y `due_amount`/`paid_status` los
-  recalcula él. Importe prellenado con lo pendiente; más que la deuda no se
-  deja guardar. Grant viejo → «Falta un permiso» + reautorizar.
+  recalcula él. Importe prellenado con lo pendiente. Grant viejo → «Falta un
+  permiso» + reautorizar.
+
+  ⚖️ **El tope del importe es del SERVIDOR, y lo de la pantalla es cortesía.**
+  `PaymentRequest` rechaza con un 422 cualquier cobro por encima de la deuda —y
+  hace bien: sin ese tope, `subtractInvoicePayment` dejaría `due_amount` en
+  negativo—. La pantalla se adelanta para no gastar un viaje, pero **solo puede
+  avisar de lo que sabe**: el tope sale de `lib/payments.paymentCeiling`, que
+  distingue tres casos —la deuda (el bueno), el total de la factura (un techo
+  cierto, cuando no se pudo leer la deuda) y **no saberlo**—. En el tercero la
+  pantalla **lo dice** en vez de callarse, que es lo que hacía antes: la
+  comparación era `amount > dueCents` y con `null` daba `false`, o sea que el
+  tope se apagaba solo justo en la pantalla que promete no dejar cobrar de más.
+  Nunca bloquea por no saber: quien decide es el servidor.
 - Sin PDF hasta publicar: sin hash, el documento no existe hacia fuera.
 - Borrar no está, y aquí ni entrará para emitidas: **su lugar lo ocupa la
   rectificativa**.
