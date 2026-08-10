@@ -5,10 +5,20 @@
  * El recuento va siempre, aunque haya una sola página: en una lista de
  * documentos, saber que son doce y no doce-de-trescientos es la mitad de la
  * información.
+ *
+ * **El pie va siempre visible, anclado a la base de la tarjeta.** Con páginas
+ * de 25 filas, un pie al final del documento queda fuera del pliegue y la
+ * paginación *parece no existir* — pasó con las 373 facturas del tenant de
+ * pruebas. No se resuelve con `sticky` (flotaría por encima de las filas,
+ * cortando el listado): la tarjeta que envuelve tabla + pie ocupa el alto
+ * disponible (`flex min-h-0 flex-1 flex-col`), el cuerpo de la tabla scrollea
+ * en su propio contenedor (`min-h-0 flex-1 overflow-y-auto`) y este pie es el
+ * último hijo estático, así que descansa en la base sin tapar nada.
  */
 
 import { describeRange } from "@/features/pimia/lib/pagination";
 import { Button } from "@/shared/ui/button";
+import { Spinner } from "@/shared/ui/spinner";
 import { cn } from "@/shared/lib/cn";
 import {
   Select,
@@ -51,7 +61,7 @@ export function PimiaPagination({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center justify-between gap-3 border-t border-border px-3 py-2.5",
+        "flex flex-wrap items-center justify-between gap-3 border-t border-border bg-background px-3 py-2.5",
         className,
       )}
     >
@@ -59,6 +69,15 @@ export function PimiaPagination({
         <p className="text-xs text-muted-foreground">
           {describeRange(page, pageSize, shown, total)}
         </p>
+        {/* La página siguiente se pide manteniendo las filas de la anterior
+            (`placeholderData`), así que sin esta señal el cambio de página
+            parece no haber hecho nada. Va aquí, donde se pulsó. */}
+        {isBusy ? (
+          <Spinner
+            aria-label="Cargando la página"
+            className="h-3.5 w-3.5 border-2 text-muted-foreground"
+          />
+        ) : null}
         {onPageSizeChange ? (
           <Select
             onValueChange={(value) => onPageSizeChange(Number(value))}

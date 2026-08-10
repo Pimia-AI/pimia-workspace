@@ -45,6 +45,7 @@ import {
   PimiaNotConnected,
   PimiaRowsSkeleton,
 } from "@/features/pimia/ui/PimiaStates";
+import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import {
   Select,
@@ -182,7 +183,10 @@ export function PimiaEstimatesScreen() {
   const hasFilters = Boolean(search || status || range !== "any");
 
   return (
-    <div className="flex h-full flex-col gap-5 overflow-y-auto p-6">
+    // El panel no scrollea como un documento: la cabecera, los totales y los
+    // filtros se quedan, y el scroll vive dentro de la tarjeta de la tabla para
+    // que el pie de paginación descanse siempre en su base.
+    <div className="flex h-full min-h-0 flex-col gap-5 overflow-hidden p-6">
       <PimiaPageHeader
         description="Presupuestos emitidos, su estado y lo que hay en juego."
         title="Presupuestos"
@@ -317,18 +321,25 @@ export function PimiaEstimatesScreen() {
       ) : null}
 
       {estimates.length > 0 ? (
-        <div className="overflow-hidden rounded-lg border border-border">
-          <PimiaEstimateList
-            estimates={estimates}
-            onOpen={(id) => void goPimiaEstimate(id)}
-            onOpenCustomer={(customerId) => void goPimiaCustomer(customerId)}
-            onSortChange={(next) => {
-              setSort(next);
-              setPage(1);
-            }}
-            sort={sort}
-            totalCents={totalCents}
-          />
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border">
+          <div
+            className={cn(
+              "min-h-0 flex-1 overflow-y-auto transition-opacity",
+              query.isFetching && "opacity-60",
+            )}
+          >
+            <PimiaEstimateList
+              estimates={estimates}
+              onOpen={(id) => void goPimiaEstimate(id)}
+              onOpenCustomer={(customerId) => void goPimiaCustomer(customerId)}
+              onSortChange={(next) => {
+                setSort(next);
+                setPage(1);
+              }}
+              sort={sort}
+              totalCents={totalCents}
+            />
+          </div>
           <PimiaPagination
             isBusy={query.isFetching}
             lastPage={lastPage}
