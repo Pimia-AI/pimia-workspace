@@ -24,6 +24,7 @@ export default defineConfig({
         "**/pimia-screens-screenshots.spec.ts",
         "**/pimia-estimate-actions.spec.ts",
         "**/pimia-invoice-actions.spec.ts",
+        "**/pimia-invoice-verifactu.spec.ts",
         "**/onboarding-docked-cta-screenshots.spec.ts",
         "**/identity-key-help.spec.ts",
         "**/key-import-reveal.spec.ts",

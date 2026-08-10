@@ -441,12 +441,29 @@ type RawInvoice = {
   is_credit_note: boolean;
   unique_hash: string | null;
   invoice_pdf_url: string | null;
+  /**
+   * El eje AEAT, tal como sale de `InvoiceResource`. Un borrador lo trae a
+   * `null` (no hay nada registrado) y las rectificativas también: se crean
+   * como `SENT` sin pasar por la transición a PUBLISHED, que es la única que
+   * registra en VeriFactu (`ChangeInvoiceStatusController`).
+   */
+  aeat_status: string | null;
+  aeat_csv: string | null;
+  hash: string | null;
+  qr_data: string | null;
+  /** La factura que rectifica, cuando es una rectificativa. */
+  rectified_invoice_id?: string | null;
 };
 
 /**
  * Facturas del tenant de reformas, cubriendo lo que un presupuesto no tiene:
  * borradores SIN número (se asigna al publicar), los dos ejes de estado, una
  * vencida (`overdue: true`, que lo dice el servidor) y una rectificativa.
+ *
+ * Y el tercer eje, el de la AEAT, con los cuatro casos que cambian lo que la
+ * ficha puede ofrecer: aceptada (por defecto), **rechazada con registro** (se
+ * reintenta), **error sin registro** (no hay nada que reintentar) y **en cola**
+ * (solo sincronizar). Más `pending`, que es el reintento automático del ERP.
  */
 const INVOICES: RawInvoice[] = [
   invoice(
@@ -482,6 +499,9 @@ const INVOICES: RawInvoice[] = [
     452_000,
     152_000,
   ),
+  // El alta en VeriFactu no salió al publicar: el ERP la reintenta por su
+  // cuenta (`RetryVeriFactuRegistration`) y NO hay registro, así que sync y
+  // retry contestarían 422. La ficha no ofrece ninguno de los dos.
   invoice(
     "88",
     "FAC-000056",
@@ -492,9 +512,12 @@ const INVOICES: RawInvoice[] = [
     "1",
     1_284_500,
     0,
+    { aeat_status: "pending", aeat_csv: null, hash: null, qr_data: null },
   ),
   // Vencida: due_date pasada y sin cobrar del todo. `overdue` lo manda el
   // servidor; el mock lo pone a mano igual que lo haría la API.
+  // Y rechazada por la AEAT CON registro: el motivo se lee del detalle remoto
+  // y las dos acciones tienen sentido.
   invoice(
     "87",
     "FAC-000055",
@@ -505,8 +528,10 @@ const INVOICES: RawInvoice[] = [
     "4",
     289_900,
     289_900,
-    { overdue: true },
+    { overdue: true, aeat_status: "rejected", aeat_csv: null },
   ),
+  // Registro en cola: en vuelo. Solo sincronizar — no hay nada que reintentar
+  // porque nada ha fallado todavía.
   invoice(
     "86",
     "FAC-000054",
@@ -517,7 +542,11 @@ const INVOICES: RawInvoice[] = [
     "5",
     118_250,
     118_250,
+    { aeat_status: "queued", aeat_csv: null },
   ),
+  // `error` del otro tipo: los reintentos automáticos se agotaron SIN llegar a
+  // crear el registro. Mismo `aeat_status` que un rechazo, y desde la fila no
+  // se distinguen: lo dice el 422 de `/verifactu/detail`.
   invoice(
     "85",
     "FAC-000053",
@@ -528,8 +557,11 @@ const INVOICES: RawInvoice[] = [
     "6",
     76_450,
     0,
+    { aeat_status: "error", aeat_csv: null, hash: null, qr_data: null },
   ),
-  // Rectificativa: misma tabla, mismo índice, importes en negativo.
+  // Rectificativa: misma tabla, mismo índice, importes en negativo. Nace SIN
+  // estado AEAT porque `createCreditNote` la crea como SENT y solo la
+  // transición a PUBLISHED registra en VeriFactu.
   invoice(
     "84",
     "FAC-R-000004",
@@ -540,7 +572,14 @@ const INVOICES: RawInvoice[] = [
     "1",
     -58_900,
     0,
-    { is_credit_note: true },
+    {
+      is_credit_note: true,
+      rectified_invoice_id: "85",
+      aeat_status: null,
+      aeat_csv: null,
+      hash: null,
+      qr_data: null,
+    },
   ),
   invoice(
     "83",
@@ -585,6 +624,16 @@ function invoice(
   const withholding = -Math.round(subTotal * 0.15);
   // Sin publicar no hay hash ni PDF: el documento aún no existe hacia fuera.
   const uniqueHash = invoiceNumber ? `fhash${id}` : null;
+  // Publicar registra en VeriFactu, así que una emitida trae estado AEAT y su
+  // prueba (CSV, huella y QR). Un borrador, nada — como en la API.
+  const aeat = uniqueHash
+    ? {
+        aeat_status: "accepted",
+        aeat_csv: `CSV${id}QK7MF2R8TP`,
+        hash: `9f2c${id}a7e401bd83c5560f7719ab2ed4c8130ba6f9e2`,
+        qr_data: `https://sede.agenciatributaria.gob.es/verifactu?id=${id}`,
+      }
+    : { aeat_status: null, aeat_csv: null, hash: null, qr_data: null };
   return {
     id,
     invoice_number: invoiceNumber,
@@ -604,6 +653,7 @@ function invoice(
     invoice_pdf_url: uniqueHash
       ? `${PIMIA_MOCK_TENANT.baseUrl}/invoices/pdf/${uniqueHash}`
       : null,
+    ...aeat,
     ...extra,
   };
 }
@@ -736,6 +786,22 @@ export async function installPimiaMock(
         return { action: match[2], estimate: found };
       };
 
+      /**
+       * Los estados AEAT en los que la factura SÍ tiene `verifactu_record_id`.
+       * Los que faltan —`pending`, `sandbox_only` y el `error` de reintentos
+       * agotados— no llegaron a crear registro, y sobre ellos `detail`, `sync`
+       * y `retry` contestan 422. El mock reproduce esa frontera porque es lo
+       * único que distingue un rechazo reintentable de un alta que no ocurrió.
+       */
+      const REGISTERED_AEAT = [
+        "queued",
+        "sent",
+        "accepted",
+        "accepted_with_warnings",
+        "rejected",
+        "annulled",
+      ];
+
       const handle = (
         method: string,
         path: string,
@@ -830,9 +896,10 @@ export async function installPimiaMock(
         }
 
         if (method === "POST") {
-          const invMatch = /^\/invoices\/([^/]+)\/(status|send|clone)$/.exec(
-            clean,
-          );
+          const invMatch =
+            /^\/invoices\/([^/]+)\/(status|send|clone|credit-note|verifactu\/sync|verifactu\/retry)$/.exec(
+              clean,
+            );
           if (invMatch) {
             const target = allInvoices.find(
               (row) => row.id === decodeURIComponent(invMatch[1]),
@@ -842,7 +909,9 @@ export async function installPimiaMock(
             }
             const action = invMatch[2];
 
-            // Publicar asigna el número oficial; se replica la serie FAC-.
+            // Publicar asigna el número oficial y, en el mismo gesto, registra
+            // la factura en VeriFactu: por eso el estado AEAT aparece aquí y
+            // no antes (`ChangeInvoiceStatusController::registerInVeriFactu`).
             const publishDraft = (row: typeof target) => {
               if (row.status !== "DRAFT") {
                 return;
@@ -855,6 +924,10 @@ export async function installPimiaMock(
               row.status = "PUBLISHED";
               row.unique_hash = `fhash${row.id}`;
               row.invoice_pdf_url = `${tenant.baseUrl}/invoices/pdf/fhash${row.id}`;
+              row.aeat_status = "accepted";
+              row.aeat_csv = `CSV${row.id}QK7MF2R8TP`;
+              row.hash = `9f2c${row.id}a7e401bd83c5560f7719ab2ed4c8130ba6f9e2`;
+              row.qr_data = `https://sede.agenciatributaria.gob.es/verifactu?id=${row.id}`;
             };
 
             if (action === "status") {
@@ -908,6 +981,127 @@ export async function installPimiaMock(
               publishDraft(target);
               target.status = "SENT";
               return { success: true, type: "send" };
+            }
+
+            if (action === "credit-note") {
+              // Las tres puertas de `CreditNoteController`, en su orden. Las
+              // dos primeras la UI ya no las ofrece; la tercera **no puede
+              // saberla**, y su mensaje trae el número de la que existe.
+              if (target.is_credit_note) {
+                return {
+                  __reject: {
+                    kind: "validation",
+                    status: 422,
+                    // El controlador contesta con la clave `error`, no
+                    // `message` — el puente Rust rescata las dos.
+                    message:
+                      "No se puede crear una rectificativa de otra rectificativa",
+                  },
+                };
+              }
+              if (target.status === "DRAFT") {
+                return {
+                  __reject: {
+                    kind: "validation",
+                    status: 422,
+                    message:
+                      "No se puede crear una rectificativa de una factura en borrador",
+                  },
+                };
+              }
+              const existing = allInvoices.find(
+                (row) => row.rectified_invoice_id === target.id,
+              );
+              if (existing) {
+                return {
+                  __reject: {
+                    kind: "validation",
+                    status: 422,
+                    message: `Ya existe una factura rectificativa para esta factura (${existing.invoice_number})`,
+                  },
+                };
+              }
+
+              // `Invoice::createCreditNote`: serie R- con número YA asignado,
+              // importes en negativo, SENT + PAID con deuda cero, enlazada a la
+              // original — y sin estado AEAT, porque no pasa por PUBLISHED.
+              const creditId = String(
+                Math.max(...allInvoices.map((row) => Number(row.id))) + 1,
+              );
+              const sequence = String(
+                allInvoices.filter((row) => row.is_credit_note).length + 1,
+              ).padStart(6, "0");
+              const credit = {
+                ...target,
+                id: creditId,
+                invoice_number: `FAC-R-${sequence}`,
+                status: "SENT",
+                paid_status: "PAID",
+                sub_total: -target.sub_total,
+                tax: -target.tax,
+                total: -target.total,
+                due_amount: 0,
+                overdue: false,
+                is_credit_note: true,
+                rectified_invoice_id: target.id,
+                aeat_status: null,
+                aeat_csv: null,
+                hash: null,
+                qr_data: null,
+                unique_hash: `fhash${creditId}`,
+                invoice_pdf_url: `${tenant.baseUrl}/invoices/pdf/fhash${creditId}`,
+              };
+              allInvoices.unshift(credit);
+              INVOICE_LINES[creditId] = (INVOICE_LINES[target.id] ?? []).map(
+                (line) => ({
+                  ...line,
+                  price: -line.price,
+                  tax: -line.tax,
+                  total: -line.total,
+                }),
+              );
+              return { data: credit };
+            }
+
+            if (action.startsWith("verifactu/")) {
+              // Sin `verifactu_record_id` no hay registro que tocar, y el
+              // controlador contesta 422 antes de llamar a VeriFactu. El mock
+              // usa la misma condición que la API: un estado que nunca llegó a
+              // crear registro (`pending`, `sandbox_only`) o el `error` de
+              // reintentos agotados.
+              if (!REGISTERED_AEAT.includes(target.aeat_status ?? "")) {
+                return {
+                  __reject: {
+                    kind: "validation",
+                    status: 422,
+                    message: "Invoice not registered in VeriFactu",
+                  },
+                };
+              }
+              // Sincronizar trae el estado de la AEAT; reintentar lo reenvía y
+              // sincroniza después. En los dos, el mock deja el registro
+              // aceptado con su prueba — el camino feliz que la UI tiene que
+              // reflejar releyendo, porque ninguno devuelve la factura.
+              target.aeat_status = "accepted";
+              target.aeat_csv = `CSV${target.id}QK7MF2R8TP`;
+              target.hash = `9f2c${target.id}a7e401bd83c5560f7719ab2ed4c8130ba6f9e2`;
+              target.qr_data = `https://sede.agenciatributaria.gob.es/verifactu?id=${target.id}`;
+              return action === "verifactu/retry"
+                ? {
+                    message: "Invoice retry initiated",
+                    data: { retried: true },
+                  }
+                : {
+                    message: "Status synced successfully",
+                    data: {
+                      id: target.id,
+                      invoice_number: target.invoice_number,
+                      aeat_status: target.aeat_status,
+                      hash: target.hash,
+                      qr_data: target.qr_data,
+                      verifactu_record_id: `vf-${target.id}`,
+                    },
+                  };
             }
 
             // clone → borrador nuevo, SIN número.
@@ -1134,6 +1328,48 @@ export async function installPimiaMock(
             );
           }
           return listPayload(rows, allInvoices, "invoice_total_count", query);
+        }
+
+        // ⚠️ Antes del `startsWith("/invoices/")` de abajo, que si no se traga
+        // esta ruta y la trata como el id `«91/verifactu/detail»`.
+        const detailMatch = /^\/invoices\/([^/]+)\/verifactu\/detail$/.exec(
+          clean,
+        );
+        if (detailMatch) {
+          const found = allInvoices.find(
+            (entry) => entry.id === decodeURIComponent(detailMatch[1]),
+          );
+          if (!found) {
+            return null;
+          }
+          if (!REGISTERED_AEAT.includes(found.aeat_status ?? "")) {
+            return {
+              __reject: {
+                kind: "validation",
+                status: 422,
+                message: "Invoice not registered in VeriFactu",
+              },
+            };
+          }
+          // Lo que devuelve la API de VeriFactu, no la fila: el motivo del
+          // rechazo vive ahí y solo ahí. `aeat_response` puede llegar como
+          // objeto o como cadena; el mock usa el objeto, que es el caso que
+          // obliga a la UI a aplanarlo.
+          return {
+            data: {
+              id: `vf-${found.id}`,
+              aeat_status: found.aeat_status,
+              attempts: 3,
+              aeat_response:
+                found.aeat_status === "rejected"
+                  ? {
+                      codigo: "1102",
+                      descripcion:
+                        "El NIF del destinatario no está identificado en el censo de la AEAT.",
+                    }
+                  : null,
+            },
+          };
         }
 
         if (clean.startsWith("/invoices/")) {

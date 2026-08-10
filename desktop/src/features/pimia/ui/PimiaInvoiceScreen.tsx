@@ -22,6 +22,7 @@ import type {
   PimiaEstimateLine,
   PimiaEstimateTax,
 } from "@/features/pimia/api/estimates";
+import { hasAeatState, isAeatUrgent } from "@/features/pimia/api/invoices";
 import { formatCents } from "@/features/pimia/lib/money";
 import { resolveDocumentTaxes, taxLabel } from "@/features/pimia/lib/taxes";
 import { useActivePimiaTenant } from "@/features/pimia/hooks/usePimiaAuth";
@@ -31,10 +32,12 @@ import {
   PimiaAmountCell,
 } from "@/features/pimia/ui/PimiaAmountCell";
 import { PimiaInvoiceActions } from "@/features/pimia/ui/PimiaInvoiceActions";
+import { PimiaInvoiceVeriFactu } from "@/features/pimia/ui/PimiaInvoiceVeriFactu";
 import { PimiaPageHeader } from "@/features/pimia/ui/PimiaPageHeader";
 import {
   PimiaInvoicePaidBadge,
   PimiaInvoiceStatusBadge,
+  PimiaVeriFactuBadge,
 } from "@/features/pimia/ui/PimiaStatusBadge";
 import {
   PimiaEmpty,
@@ -223,13 +226,19 @@ export function PimiaInvoiceScreen({ invoiceId }: { invoiceId: string }) {
             }
             description={invoice.customerName ?? undefined}
             meta={
-              <span className="flex flex-wrap items-center gap-1.5">
+              <span className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                 <PimiaInvoiceStatusBadge status={invoice.status} />
                 {invoice.status !== "DRAFT" ? (
                   <PimiaInvoicePaidBadge
                     isOverdue={invoice.isOverdue}
                     paidStatus={invoice.paidStatus}
                   />
+                ) : null}
+                {/* El tercer eje, a la misma altura que los otros dos: el
+                    estado ante la AEAT se lee de un vistazo, y el bloque de
+                    abajo solo añade la prueba o el arreglo. */}
+                {hasAeatState(invoice.aeatStatus) ? (
+                  <PimiaVeriFactuBadge status={invoice.aeatStatus as string} />
                 ) : null}
               </span>
             }
@@ -242,6 +251,13 @@ export function PimiaInvoiceScreen({ invoiceId }: { invoiceId: string }) {
               )
             }
           />
+
+          {/* Un registro rechazado o en error es lo más urgente de la página:
+              sube aquí, como el bloque tintado del panel. Lo que salió bien
+              baja con el resto — la insignia de arriba ya lo dice. */}
+          {isAeatUrgent(invoice.aeatStatus) ? (
+            <PimiaInvoiceVeriFactu invoice={invoice} />
+          ) : null}
 
           <div className="flex shrink-0 flex-col gap-4 lg:flex-row">
             <FieldCard
@@ -378,6 +394,10 @@ export function PimiaInvoiceScreen({ invoiceId }: { invoiceId: string }) {
               ) : null}
             </div>
           </section>
+
+          {!isAeatUrgent(invoice.aeatStatus) ? (
+            <PimiaInvoiceVeriFactu invoice={invoice} />
+          ) : null}
 
           {invoice.notes ? (
             <section className="shrink-0 rounded-lg border border-border">

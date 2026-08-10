@@ -11,6 +11,7 @@ import type { ReactNode } from "react";
 
 import type { PimiaEstimateStatus } from "@/features/pimia/api/estimates";
 import type {
+  PimiaInvoiceAeatStatus,
   PimiaInvoicePaidStatus,
   PimiaInvoiceStatus,
 } from "@/features/pimia/api/invoices";
@@ -151,5 +152,47 @@ export function PimiaInvoicePaidBadge({
     <PimiaStatusBadge tone={meta?.tone ?? "neutral"}>
       {meta?.label ?? paidStatus}
     </PimiaStatusBadge>
+  );
+}
+
+/**
+ * El tercer eje: el registro en la AEAT.
+ *
+ * Las etiquetas y los tonos son **los mismos que el panel Vue**
+ * (`helpers/invoice-status.js`): la misma factura no puede verse «Rechazada» en
+ * rojo en un sitio y en ámbar en el otro. `pending` es ámbar y no rojo a
+ * propósito — el registro no falló del todo, el reintento automático sigue en
+ * marcha.
+ */
+export const INVOICE_AEAT_META: Record<
+  PimiaInvoiceAeatStatus,
+  { label: string; tone: PimiaStatusTone }
+> = {
+  not_applicable: { label: "No aplica", tone: "neutral" },
+  queued: { label: "En cola", tone: "neutral" },
+  pending: { label: "Pendiente", tone: "warning" },
+  sent: { label: "Enviada", tone: "neutral" },
+  accepted: { label: "Aceptada", tone: "success" },
+  accepted_with_warnings: { label: "Aceptada con avisos", tone: "success" },
+  rejected: { label: "Rechazada", tone: "danger" },
+  error: { label: "Error", tone: "danger" },
+  annulled: { label: "Anulada", tone: "neutral" },
+  sandbox_only: { label: "Solo pruebas", tone: "neutral" },
+};
+
+export function PimiaVeriFactuBadge({ status }: { status: string }) {
+  const meta = INVOICE_AEAT_META[status as PimiaInvoiceAeatStatus];
+  return (
+    <span
+      className="inline-flex items-center gap-1.5"
+      data-testid="pimia-verifactu-badge"
+    >
+      <span className="text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
+        VeriFactu
+      </span>
+      <PimiaStatusBadge tone={meta?.tone ?? "neutral"}>
+        {meta?.label ?? status}
+      </PimiaStatusBadge>
+    </span>
   );
 }
