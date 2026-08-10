@@ -248,6 +248,35 @@ tiene y un presupuesto no, y cómo lo enseña la UI:
 - ⚖️ **Sin borrar, y aquí ni entrará para emitidas**: una factura emitida no se
   borra, se rectifica. Si algún día entra, será solo para borradores.
 
+### Las acciones de la factura
+
+Mismo molde que las del presupuesto (`PimiaInvoiceActions`): ficha y fila
+ofrecen lo mismo, la primaria cambia con el recorrido (borrador→**Publicar**,
+publicada→**Enviar**, con deuda→**Registrar cobro**; pagada del todo, solo el
+menú), y el cuidado es proporcional a lo que cuesta deshacer.
+
+| Acción | Endpoint | Confirma | Permiso |
+|---|---|---|---|
+| **Publicar** | `POST /invoices/{id}/status` (PUBLISHED) | Diálogo ⛔ | `invoices:write` |
+| Enviar por correo | `POST /invoices/{id}/send` | Diálogo | `invoices:write` |
+| Marcar como enviada | `POST /invoices/{id}/status` (SENT) | Diálogo | `invoices:write` |
+| **Registrar cobro** | `POST /payments` | Diálogo | **`payments:write`** |
+| Duplicar | `POST /invoices/{id}/clone` | Sí | `invoices:write` |
+| Abrir el PDF | `invoice_pdf_url` | No | ninguno |
+
+- ⛔ **Publicar es lo irreversible de verdad**: número oficial + VeriFactu
+  (AEAT). El diálogo lo cuenta, incluido que los errores posteriores se
+  corrigen con rectificativa. **Enviar o marcar-enviada un borrador publica
+  primero** (auto-publish del controlador) y los dos diálogos lo avisan.
+- **Registrar cobro** escribe en el dominio `payments` (decisión 👤 2026-08-10:
+  entra con el scope ya en `REQUESTED_SCOPES`). El `payment_number` no se pide
+  —lo genera el servidor, sin carrera— y `due_amount`/`paid_status` los
+  recalcula él. Importe prellenado con lo pendiente; más que la deuda no se
+  deja guardar. Grant viejo → «Falta un permiso» + reautorizar.
+- Sin PDF hasta publicar: sin hash, el documento no existe hacia fuera.
+- Fuera de este pase: **rectificativas** (`/credit-note`) y **VeriFactu**
+  (sync/retry). Y borrar, que aquí ni entrará para emitidas.
+
 Los impuestos y las líneas tienen la misma forma de cable que en presupuestos:
 `api/invoices.ts` reutiliza los normalizadores de `api/estimates.ts` — las
 trampas del IVA + IRPF viven en un solo sitio.

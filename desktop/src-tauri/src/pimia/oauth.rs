@@ -36,6 +36,8 @@ pub(crate) const REQUESTED_SCOPES: &[&str] = &[
     "estimates:write",
     "invoices:write",
     "items:read",
+    // Registrar el cobro de una factura crea un pago: dominio `payments`.
+    "payments:write",
 ];
 
 const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);

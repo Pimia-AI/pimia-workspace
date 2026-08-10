@@ -204,3 +204,103 @@ export async function getInvoice(
   const raw = unwrapItem<RawInvoice>(payload);
   return raw ? normalizeInvoice(raw) : null;
 }
+
+/**
+ * Publica una factura borrador.
+ *
+ * ⛔ La acción irreversible de verdad: el servidor asigna el número oficial de
+ * la serie, registra la factura en VeriFactu (AEAT) y descuenta stock. Solo
+ * acepta borradores. Responde `{success, invoice_number, ...}` — se invalida y
+ * se relee, no se siembra caché.
+ */
+export async function publishInvoice(invoiceId: string): Promise<void> {
+  await pimiaRequest<unknown>({
+    method: "POST",
+    path: `/invoices/${encodeURIComponent(invoiceId)}/status`,
+    body: { status: "PUBLISHED" },
+  });
+}
+
+/**
+ * Marca una factura como enviada.
+ *
+ * ⚠️ Un borrador se **publica primero** (auto-publish del controlador): número
+ * + AEAT. La UI tiene que avisarlo antes, no descubrirse después.
+ */
+export async function markInvoiceSent(invoiceId: string): Promise<void> {
+  await pimiaRequest<unknown>({
+    method: "POST",
+    path: `/invoices/${encodeURIComponent(invoiceId)}/status`,
+    body: { status: "SENT" },
+  });
+}
+
+export type PimiaInvoiceMail = {
+  to: string;
+  subject: string;
+  body: string;
+};
+
+/**
+ * Manda la factura por correo. Mismo contrato que el presupuesto: `from` lo
+ * pone la instancia y el que se mande se ignora (factSaas #314/#315). Enviar
+ * un borrador también lo publica primero.
+ */
+export async function sendInvoice(
+  invoiceId: string,
+  mail: PimiaInvoiceMail,
+): Promise<void> {
+  await pimiaRequest<unknown>({
+    method: "POST",
+    path: `/invoices/${encodeURIComponent(invoiceId)}/send`,
+    body: {
+      to: mail.to.trim(),
+      subject: mail.subject.trim(),
+      body: mail.body,
+    },
+  });
+}
+
+/** Duplica la factura en un borrador nuevo, sin número, con las mismas líneas. */
+export async function cloneInvoice(
+  invoiceId: string,
+): Promise<PimiaInvoice | null> {
+  const payload = await pimiaRequest<unknown>({
+    method: "POST",
+    path: `/invoices/${encodeURIComponent(invoiceId)}/clone`,
+  });
+  const raw = unwrapItem<RawInvoice>(payload);
+  return raw ? normalizeInvoice(raw) : null;
+}
+
+export type PimiaInvoicePaymentDraft = {
+  invoiceId: string;
+  customerId: string;
+  /** Céntimos enteros, > 0. */
+  amountCents: number;
+  /** `YYYY-MM-DD`. */
+  paymentDate: string;
+};
+
+/**
+ * Registra el cobro (total o parcial) de una factura.
+ *
+ * Escribe en el dominio `payments` — exige `payments:write`. El
+ * `payment_number` NO se manda: es opcional y lo genera el servidor con la
+ * misma serie que `next-number`, así que no hay carrera que reintentar. El
+ * servidor recalcula `due_amount` y `paid_status` de la factura.
+ */
+export async function recordInvoicePayment(
+  draft: PimiaInvoicePaymentDraft,
+): Promise<void> {
+  await pimiaRequest<unknown>({
+    method: "POST",
+    path: "/payments",
+    body: {
+      payment_date: draft.paymentDate,
+      customer_id: draft.customerId,
+      invoice_id: draft.invoiceId,
+      amount: draft.amountCents,
+    },
+  });
+}

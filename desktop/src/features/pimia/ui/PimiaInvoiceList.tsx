@@ -28,14 +28,8 @@ import {
   PimiaInvoicePaidBadge,
   PimiaInvoiceStatusBadge,
 } from "@/features/pimia/ui/PimiaStatusBadge";
-import { Button } from "@/shared/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/shared/ui/dropdown-menu";
-import { MoreHorizontal } from "lucide-react";
+import { PimiaInvoiceActions } from "@/features/pimia/ui/PimiaInvoiceActions";
+import { DropdownMenuItem } from "@/shared/ui/dropdown-menu";
 import {
   Table,
   TableBody,
@@ -242,9 +236,8 @@ export function PimiaInvoiceList({
 }
 
 /**
- * Navegación y copiar, nada más: las acciones de documento de una factura
- * (publicar, enviar, cobrar…) entran en su propio pase, como hicieron las del
- * presupuesto. Nada en gris que prometa y no cumpla.
+ * El menú de la fila: navegación arriba y, debajo, las mismas acciones de
+ * documento que ofrece la ficha (`PimiaInvoiceActions`).
  */
 function PimiaInvoiceRowActions({
   invoice,
@@ -258,44 +251,36 @@ function PimiaInvoiceRowActions({
   const customerId = invoice.customerId;
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          aria-label={`Acciones de ${invoice.invoiceNumber ?? "la factura sin numerar"}`}
-          className="h-7 w-7 text-muted-foreground"
-          data-testid={`pimia-invoice-actions-${invoice.id}`}
-          size="icon"
-          variant="ghost"
-        >
-          <MoreHorizontal className="h-4 w-4" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
-        {onOpen ? (
-          <DropdownMenuItem onSelect={() => onOpen(invoice.id)}>
-            <FileText className="h-4 w-4" />
-            Ver la factura
-          </DropdownMenuItem>
-        ) : null}
-        {customerId && onOpenCustomer ? (
-          <DropdownMenuItem onSelect={() => onOpenCustomer(customerId)}>
-            <User className="h-4 w-4" />
-            Ver el cliente
-          </DropdownMenuItem>
-        ) : null}
-        {invoice.invoiceNumber ? (
-          <DropdownMenuItem
-            onSelect={() => {
-              void navigator.clipboard?.writeText(
-                invoice.invoiceNumber as string,
-              );
-            }}
-          >
-            <Copy className="h-4 w-4" />
-            Copiar el número
-          </DropdownMenuItem>
-        ) : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <PimiaInvoiceActions
+      invoice={invoice}
+      navigationItems={
+        <>
+          {onOpen ? (
+            <DropdownMenuItem onSelect={() => onOpen(invoice.id)}>
+              <FileText className="h-4 w-4" />
+              Ver la factura
+            </DropdownMenuItem>
+          ) : null}
+          {customerId && onOpenCustomer ? (
+            <DropdownMenuItem onSelect={() => onOpenCustomer(customerId)}>
+              <User className="h-4 w-4" />
+              Ver el cliente
+            </DropdownMenuItem>
+          ) : null}
+          {invoice.invoiceNumber ? (
+            <DropdownMenuItem
+              onSelect={() => {
+                void navigator.clipboard?.writeText(
+                  invoice.invoiceNumber as string,
+                );
+              }}
+            >
+              <Copy className="h-4 w-4" />
+              Copiar el número
+            </DropdownMenuItem>
+          ) : null}
+        </>
+      }
+    />
   );
 }
