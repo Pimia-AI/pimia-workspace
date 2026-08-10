@@ -45,6 +45,31 @@ test("readCents acepta entero o cadena entera y nada más", () => {
   assert.equal(readCents("cuatro mil"), null);
 });
 
+/**
+ * `due_amount` NO llega como los demás importes: es un `decimal:2` de Laravel
+ * sobre una columna que ya está en céntimos. Mientras esto no se leyó, la
+ * columna «Pendiente» de clientes pintaba una raya, la ficha de la factura
+ * perdía la fila «Pendiente de cobro» y —lo peor— el tope de «no cobrar de
+ * más» del diálogo de cobro no llegaba a dispararse nunca.
+ */
+test("readCents lee el decimal:2 que la API usa para due_amount", () => {
+  // Las formas exactas vistas en un tenant vivo.
+  assert.equal(readCents("45050.00"), 45050);
+  assert.equal(readCents("2000.00"), 2000);
+  assert.equal(readCents("0.00"), 0);
+  assert.equal(readCents(" 1000.00 "), 1000);
+  assert.equal(readCents("-1500.00"), -1500);
+  // La cola de ceros no dice nada, venga con la longitud que venga.
+  assert.equal(readCents("300.0"), 300);
+  assert.equal(readCents("300.000"), 300);
+  // Y lo que NO se acepta sigue sin aceptarse: una parte decimal con algo
+  // distinto de cero es otra unidad, y adivinarla es el bug que esto evita.
+  assert.equal(readCents("1234.56"), null);
+  assert.equal(readCents("1234.01"), null);
+  assert.equal(readCents("45050."), null);
+  assert.equal(readCents(".00"), null);
+});
+
 test("parseAmountToCents entiende cómo escribe un usuario español", () => {
   assert.equal(parseAmountToCents("4.500,50"), 450050);
   assert.equal(parseAmountToCents("4500,50"), 450050);
