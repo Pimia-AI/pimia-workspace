@@ -30,6 +30,7 @@ import {
   PimiaAmount,
   PimiaAmountCell,
 } from "@/features/pimia/ui/PimiaAmountCell";
+import { PimiaInvoiceActions } from "@/features/pimia/ui/PimiaInvoiceActions";
 import { PimiaPageHeader } from "@/features/pimia/ui/PimiaPageHeader";
 import {
   PimiaInvoicePaidBadge,
@@ -42,6 +43,7 @@ import {
   PimiaRowsSkeleton,
 } from "@/features/pimia/ui/PimiaStates";
 import { Button } from "@/shared/ui/button";
+import { DropdownMenuItem } from "@/shared/ui/dropdown-menu";
 import {
   Table,
   TableBody,
@@ -189,17 +191,24 @@ export function PimiaInvoiceScreen({ invoiceId }: { invoiceId: string }) {
         <>
           <PimiaPageHeader
             action={
-              invoice.customerId ? (
-                <Button
-                  onClick={() =>
-                    void goPimiaCustomer(invoice.customerId as string)
+              <div className="flex items-center gap-2">
+                <PimiaInvoiceActions
+                  invoice={invoice}
+                  navigationItems={
+                    invoice.customerId ? (
+                      <DropdownMenuItem
+                        onSelect={() =>
+                          void goPimiaCustomer(invoice.customerId as string)
+                        }
+                      >
+                        <User className="h-4 w-4" />
+                        Ver el cliente
+                      </DropdownMenuItem>
+                    ) : null
                   }
-                  variant="outline"
-                >
-                  <User className="h-4 w-4" />
-                  Ver el cliente
-                </Button>
-              ) : null
+                  showPrimaryAction
+                />
+              </div>
             }
             back={
               <Button

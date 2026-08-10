@@ -829,6 +829,147 @@ export async function installPimiaMock(
           }
         }
 
+        if (method === "POST") {
+          const invMatch = /^\/invoices\/([^/]+)\/(status|send|clone)$/.exec(
+            clean,
+          );
+          if (invMatch) {
+            const target = allInvoices.find(
+              (row) => row.id === decodeURIComponent(invMatch[1]),
+            );
+            if (!target) {
+              return null;
+            }
+            const action = invMatch[2];
+
+            // Publicar asigna el número oficial; se replica la serie FAC-.
+            const publishDraft = (row: typeof target) => {
+              if (row.status !== "DRAFT") {
+                return;
+              }
+              const nums = allInvoices
+                .map((r) => Number((r.invoice_number ?? "").split("-").pop()))
+                .filter((n) => Number.isFinite(n));
+              const next = String(Math.max(0, ...nums) + 1).padStart(6, "0");
+              row.invoice_number = `FAC-${next}`;
+              row.status = "PUBLISHED";
+              row.unique_hash = `fhash${row.id}`;
+              row.invoice_pdf_url = `${tenant.baseUrl}/invoices/pdf/fhash${row.id}`;
+            };
+
+            if (action === "status") {
+              const wanted = String(body.status ?? "");
+              if (wanted === "PUBLISHED") {
+                if (target.status !== "DRAFT") {
+                  return {
+                    __reject: {
+                      kind: "validation",
+                      status: 422,
+                      message:
+                        "Solo se pueden publicar facturas en estado borrador.",
+                    },
+                  };
+                }
+                publishDraft(target);
+                return { success: true, invoice_number: target.invoice_number };
+              }
+              if (wanted === "SENT") {
+                if (!["DRAFT", "PUBLISHED"].includes(target.status)) {
+                  return {
+                    __reject: {
+                      kind: "validation",
+                      status: 422,
+                      message:
+                        "Solo se pueden enviar facturas en estado borrador o publicada.",
+                    },
+                  };
+                }
+                // Un borrador se publica primero, como el controlador real.
+                publishDraft(target);
+                target.status = "SENT";
+                return { success: true };
+              }
+              return { success: true };
+            }
+
+            if (action === "send") {
+              const faltan = ["subject", "body", "to"].filter(
+                (campo) => String(body[campo] ?? "").trim() === "",
+              );
+              if (faltan.length > 0) {
+                return {
+                  __reject: {
+                    kind: "validation",
+                    status: 422,
+                    message: `The ${faltan[0]} field is required.`,
+                  },
+                };
+              }
+              publishDraft(target);
+              target.status = "SENT";
+              return { success: true, type: "send" };
+            }
+
+            // clone → borrador nuevo, SIN número.
+            const nextId = String(
+              Math.max(...allInvoices.map((row) => Number(row.id))) + 1,
+            );
+            const copy = {
+              ...target,
+              id: nextId,
+              invoice_number: null,
+              status: "DRAFT",
+              paid_status: "UNPAID",
+              due_amount: target.total,
+              overdue: false,
+              unique_hash: null,
+              invoice_pdf_url: null,
+            };
+            allInvoices.unshift(copy);
+            INVOICE_LINES[nextId] = INVOICE_LINES[target.id] ?? [];
+            return { data: copy };
+          }
+
+          if (clean === "/payments") {
+            // El cobro: el servidor genera el payment_number y recalcula la
+            // deuda y el paid_status de la factura. Con deuda a cero, la
+            // factura pasa a COMPLETED.
+            if (opts.staleGrant) {
+              return {
+                __reject: {
+                  kind: "forbidden",
+                  status: 403,
+                  message: "Token lacks the payments:write scope",
+                },
+              };
+            }
+            const target = allInvoices.find(
+              (row) => row.id === String(body.invoice_id ?? ""),
+            );
+            const amount = Number(body.amount ?? 0);
+            if (!target || !Number.isFinite(amount) || amount <= 0) {
+              return {
+                __reject: {
+                  kind: "validation",
+                  status: 422,
+                  message: "The amount field is required.",
+                },
+              };
+            }
+            target.due_amount = Math.max(0, target.due_amount - amount);
+            if (target.due_amount === 0) {
+              target.paid_status = "PAID";
+              target.status = "COMPLETED";
+              target.overdue = false;
+            } else {
+              target.paid_status = "PARTIALLY_PAID";
+            }
+            return {
+              data: { id: "9001", payment_number: "PAY-000031", amount },
+            };
+          }
+        }
+
         if (clean === "/customers") {
           const search = String(query.search ?? "")
             .trim()
@@ -1051,6 +1192,8 @@ export async function installPimiaMock(
               estimate_mail_body:
                 "Has recibido un presupuesto de <b>{COMPANY_NAME}</b>.</br> Puedes descargarlo con el botón de abajo:",
               estimate_auto_generate: "YES",
+              invoice_mail_body:
+                "Adjuntamos la factura de <b>{COMPANY_NAME}</b>.</br> Puede descargarla con el botón de abajo:",
             },
           };
         }
