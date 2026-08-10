@@ -164,13 +164,31 @@ Historia completa y qué vigilar: la entrada del registro.
 **3. Sandbox de los agentes codex.** El adaptador `codex-acp` trae tres modos
 cerrados (`read-only`, `agent`, `agent-full-access`) y pasa la política de
 sandbox **por turno**, así que el `CODEX_CONFIG` global que inyecta
-`buzz-acp` (`codex_network_env`) es letra muerta. Con el arnés auto-aprobando
-(punto 2), el modo `agent` por defecto **funciona sin tocar nada**: el CLI
-falla por red dentro del sandbox, codex pide escalar y la escalación se
-aprueba sola. `INITIAL_AGENT_MODE` ya no es necesario — si quedó
-`agent-full-access` en `env_vars` de algún agente de la era del auto-rechazo,
-retirarlo y reiniciar el agente. (El modo de sandbox propio
-«workspace-write + red» se descartó: PR #9, cerrado sin mergear.)
+`buzz-acp` (`codex_network_env`) es letra muerta. Un agente codex que deba
+usar el CLI necesita, en su ficha (Edit agent → variables de entorno) o en
+`managed-agents.json`:
+
+```
+INITIAL_AGENT_MODE=agent-full-access
+```
+
+Condición innegociable: ese modo es **sin sandbox y sin preguntas** — el
+agente ejecuta con los permisos del usuario de macOS. Solo con
+`respond_to: allowlist` corto.
+
+**Y no, la auto-aprobación del arnés no lo sustituye** — probado en vivo el
+2026-08-10, contra la predicción que ocupaba este párrafo. La teoría era que
+con el arnés aprobando (punto 2) bastaba el modo `agent`: el CLI falla por
+red, codex pide escalar, la escalación se aprueba sola. En la práctica **codex
+no pidió escalar**: cero `request_permission` en el log del arnés. El sandbox
+de macOS no emite una señal distinguible de «bloqueado» — la resolución DNS
+falla igual que una red caída, el CLI devuelve su error de red normal, y codex
+lo reporta como fallo en vez de pedir permiso. La víspera sí había escalado
+con el mismo montaje: **que escale depende del modelo, no del mecanismo**, así
+que no se puede construir sobre ello. Las únicas vías con red fiable siguen
+siendo `agent-full-access` (sin sandbox) o un modo intermedio propio
+(«workspace-write + red», descartado: PR #9, cerrado sin mergear). Un agente
+codex sin ninguna de las dos es un agente mudo.
 
 **4. MCPs: los agentes heredan el scope usuario.** Todo servidor MCP en el
 scope usuario de Claude Code (`~/.claude.json`) entra en **cada** agente
@@ -207,7 +225,21 @@ Si algo falla, los logs por agente están en
 receta aíslan la pieza en un minuto: auth (binario del SDK con `-p`),
 permisos (buscar `reject_once` / `permission denied` en el log — si aparecen,
 el binario del arnés es anterior al sync de 0.5.8), sandbox de codex
-(`ps eww` sobre el arnés: no debería quedar ningún `INITIAL_AGENT_MODE`).
+(`ps eww` sobre el arnés: debe llevar `INITIAL_AGENT_MODE`; un codex que
+reporta fallos de DNS o de red es un codex sin él).
+
+**El arnés no lo recompila `tauri dev`.** `buzz-acp` vive en el target del
+workspace raíz (`target/debug/buzz-acp`), no en el de la app; lanzar la app de
+dev tras un merge deja el arnés **viejo** corriendo y el smoke test mide la
+era equivocada. Tras cualquier sync que toque `crates/buzz-acp`:
+
+```bash
+cargo build -p buzz-acp     # desde el checkout principal
+```
+
+Para saber qué era lleva el binario sin leer código:
+`strings -a target/debug/buzz-acp | grep -c 'auto-approving permission'`
+(1 = aprueba, 0 = rechaza).
 
 ## Registro de divergencias
 
@@ -986,9 +1018,18 @@ lo que el agente pida (claude además corre en `bypassPermissions`). La
 contención pasa a ser: **quién puede activar a cada agente** (`respond_to` /
 allowlists — mantenerlos cortos), **qué MCPs heredan** (scope usuario vacío,
 ver «El estado fuera del repo») y **qué alcanza la máquina** donde corren.
-Efecto lateral bueno: los agentes codex funcionan en su modo `agent` por
-defecto (la escalación de red se auto-aprueba), así que `INITIAL_AGENT_MODE`
-deja de ser necesario en la configuración de instancia.
+
+**Un efecto lateral que se predijo y no se cumplió** (verificado el
+2026-08-10, el día siguiente): se dio por hecho que los agentes codex
+funcionarían ya en su modo `agent` por defecto, porque la escalación de red se
+auto-aprobaría, y que `INITIAL_AGENT_MODE` dejaba de hacer falta. Falso: con
+el arnés nuevo y sin esa variable, el agente codex de prueba **no pidió
+escalar** (cero `request_permission` en su log) — se limitó a reportar el
+fallo de DNS. El sandbox no emite señal distinguible de «bloqueado», así que
+codex ve un error de red corriente. `INITIAL_AGENT_MODE=agent-full-access`
+sigue siendo obligatorio para agentes codex; detalle en la receta, punto 3.
+Los agentes claude sí quedaron como se esperaba: turno completado, sin
+bloqueos de permiso.
 
 **Qué vigilar en cada merge.** Upstream sigue iterando sobre permisos del
 arnés. Si aterriza un modelo *con política configurable* (no todo-o-nada),
