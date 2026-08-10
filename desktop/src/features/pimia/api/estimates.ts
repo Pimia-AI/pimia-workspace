@@ -76,7 +76,12 @@ export type PimiaEstimate = {
   expiryDate: string | null;
   customerId: string | null;
   customerName: string | null;
-  /** Solo en el detalle: el índice devuelve del cliente nada más el nombre. */
+  /**
+   * En el detalle siempre; en el índice, desde que la vista ligera
+   * (`view=summary`) manda customer {id, name, email, phone}. Antes el índice
+   * traía del cliente nada más el nombre, y el diálogo de envío solo podía
+   * prefijar el destinatario desde la ficha.
+   */
   customerEmail: string | null;
   customerPhone: string | null;
   notes: string | null;
@@ -238,6 +243,13 @@ export async function listEstimates(
   const payload = await pimiaRequest<unknown>({
     path: "/estimates",
     query: {
+      // Opt-in a la vista ligera del índice (`view=summary`, factSaas): la
+      // cabecera, customer {id, name, email, phone} y el PDF — sin items,
+      // taxes ni notes, que solo los usa la ficha (`getEstimate`). Baja la
+      // página de ~550-740 KB a ~13 KB. Un servidor que aún no conoce el
+      // parámetro lo ignora y responde la vista completa, así que este
+      // opt-in puede desplegarse por delante de la plataforma.
+      view: "summary",
       page: input.page,
       limit: input.limit,
       search: input.search?.trim() || undefined,
