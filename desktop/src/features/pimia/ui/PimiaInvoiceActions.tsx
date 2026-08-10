@@ -9,14 +9,17 @@
  * `payments` — con un grant viejo se explica y se ofrece reautorizar, igual
  * que convertir en presupuestos.
  *
- * ⚖️ Borrar no está, a propósito: una factura emitida no se borra, se
- * rectifica. Las rectificativas y VeriFactu (sync/retry) quedan para su pase.
+ * ⚖️ Borrar no está, a propósito: una factura emitida no se borra, **se
+ * rectifica** — y esa es justo la acción que aquí ocupa su lugar. VeriFactu no
+ * está en este menú a propósito: sus acciones dependen de un estado que solo se
+ * ve en la ficha, y ofrecerlas desde una fila sería pedir a ciegas.
  */
 
 import * as React from "react";
 import {
   CheckCircle2,
   Files,
+  FileMinus2,
   FileText,
   HandCoins,
   MoreHorizontal,
@@ -32,6 +35,7 @@ import { openExternalUrl } from "@/features/pimia/api/shell";
 import { useActivePimiaTenant } from "@/features/pimia/hooks/usePimiaAuth";
 import {
   useClonePimiaInvoice,
+  useCreatePimiaCreditNote,
   useMarkPimiaInvoiceSent,
   usePublishPimiaInvoice,
 } from "@/features/pimia/hooks/usePimiaResources";
@@ -68,7 +72,12 @@ function grantAllows(scopes: readonly string[], scope: string) {
   );
 }
 
-type Confirmation = "publish" | "markSent" | "clone" | "paymentNeedsScope";
+type Confirmation =
+  | "publish"
+  | "markSent"
+  | "clone"
+  | "creditNote"
+  | "paymentNeedsScope";
 
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof PimiaApiError ? error.message : fallback;
@@ -115,10 +124,23 @@ export function PimiaInvoiceActions({
   const publish = usePublishPimiaInvoice();
   const markSent = useMarkPimiaInvoiceSent();
   const clone = useClonePimiaInvoice();
+  const creditNote = useCreatePimiaCreditNote();
 
   const canRecordPayment = grantAllows(tenant?.scopes ?? [], PAYMENTS_SCOPE);
-  const isBusy = publish.isPending || markSent.isPending || clone.isPending;
+  const isBusy =
+    publish.isPending ||
+    markSent.isPending ||
+    clone.isPending ||
+    creditNote.isPending;
   const isDraft = invoice.status === "DRAFT";
+
+  /**
+   * Las dos condiciones que el servidor comprueba y la UI puede saber: ni de un
+   * borrador (no hay nada emitido que corregir) ni de otra rectificativa. La
+   * tercera —que ya exista la suya— solo la sabe el servidor, y su 422 trae el
+   * número de la que existe, así que se ofrece y se enseña lo que conteste.
+   */
+  const canCreditNote = !isDraft && !invoice.isCreditNote;
 
   const handlePublish = async () => {
     setConfirmation(null);
@@ -152,6 +174,25 @@ export function PimiaInvoiceActions({
       }
     } catch (error) {
       toast.error(errorMessage(error, "No se pudo duplicar la factura"));
+    }
+  };
+
+  const handleCreditNote = async () => {
+    setConfirmation(null);
+    try {
+      const created = await creditNote.mutateAsync(invoice.id);
+      toast.success(
+        created?.invoiceNumber
+          ? `Rectificativa ${created.invoiceNumber} creada`
+          : "Rectificativa creada",
+      );
+      if (created) {
+        void goPimiaInvoice(created.id);
+      }
+    } catch (error) {
+      // El 422 de «ya existe una rectificativa» trae su número dentro: es más
+      // útil que cualquier texto propio, así que se enseña tal cual.
+      toast.error(errorMessage(error, "No se pudo crear la rectificativa"));
     }
   };
 
@@ -265,6 +306,13 @@ export function PimiaInvoiceActions({
 
           <DropdownMenuSeparator />
 
+          {/* ⚖️ El lugar de «borrar»: una emitida no se borra, se rectifica. */}
+          {canCreditNote ? (
+            <DropdownMenuItem onSelect={() => setConfirmation("creditNote")}>
+              <FileMinus2 className="h-4 w-4" />
+              Crear rectificativa
+            </DropdownMenuItem>
+          ) : null}
           <DropdownMenuItem onSelect={() => setConfirmation("clone")}>
             <Files className="h-4 w-4" />
             Duplicar
@@ -350,6 +398,32 @@ export function PimiaInvoiceActions({
                 <AlertDialogCancel>Cancelar</AlertDialogCancel>
                 <AlertDialogAction onClick={() => void handleClone()}>
                   Duplicar
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </>
+          ) : null}
+
+          {confirmation === "creditNote" ? (
+            <>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  ¿Crear la rectificativa de{" "}
+                  {invoice.invoiceNumber ?? "esta factura"}?
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  Se emite una <strong>factura nueva</strong> de la serie{" "}
+                  <span className="font-mono">R-</span>, con su propio número
+                  oficial desde el primer momento y las mismas líneas e
+                  impuestos <strong>en negativo</strong>. Queda emitida y
+                  saldada, enlazada a esta factura, que{" "}
+                  <strong>no se toca</strong>: la rectificativa la corrige, no
+                  la sustituye ni la borra. Solo puede haber una por factura.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                <AlertDialogAction onClick={() => void handleCreditNote()}>
+                  Crear rectificativa
                 </AlertDialogAction>
               </AlertDialogFooter>
             </>

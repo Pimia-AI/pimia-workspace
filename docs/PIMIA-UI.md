@@ -261,6 +261,7 @@ menú), y el cuidado es proporcional a lo que cuesta deshacer.
 | Enviar por correo | `POST /invoices/{id}/send` | Diálogo | `invoices:write` |
 | Marcar como enviada | `POST /invoices/{id}/status` (SENT) | Diálogo | `invoices:write` |
 | **Registrar cobro** | `POST /payments` | Diálogo | **`payments:write`** |
+| **Crear rectificativa** | `POST /invoices/{id}/credit-note` | Sí | `invoices:write` |
 | Duplicar | `POST /invoices/{id}/clone` | Sí | `invoices:write` |
 | Abrir el PDF | `invoice_pdf_url` | No | ninguno |
 
@@ -274,12 +275,111 @@ menú), y el cuidado es proporcional a lo que cuesta deshacer.
   recalcula él. Importe prellenado con lo pendiente; más que la deuda no se
   deja guardar. Grant viejo → «Falta un permiso» + reautorizar.
 - Sin PDF hasta publicar: sin hash, el documento no existe hacia fuera.
-- Fuera de este pase: **rectificativas** (`/credit-note`) y **VeriFactu**
-  (sync/retry). Y borrar, que aquí ni entrará para emitidas.
+- Borrar no está, y aquí ni entrará para emitidas: **su lugar lo ocupa la
+  rectificativa**.
 
 Los impuestos y las líneas tienen la misma forma de cable que en presupuestos:
 `api/invoices.ts` reutiliza los normalizadores de `api/estimates.ts` — las
 trampas del IVA + IRPF viven en un solo sitio.
+
+### ⚖️ La rectificativa, que es lo que sustituye a borrar
+
+Una factura emitida no se borra: se corrige emitiendo otra que la anula. Por eso
+«Crear rectificativa» ocupa en el menú el sitio donde en presupuestos habría un
+«Eliminar», y por eso se ofrece exactamente donde el servidor la acepta —**una
+emitida que no sea ya una rectificativa**—, que son dos de las tres puertas de
+`CreditNoteController`.
+
+Lo que crea el servidor (`Invoice::createCreditNote`), y que el diálogo cuenta
+sin adornar: una **factura nueva** de la serie `R-` con su **número oficial ya
+asignado** —no pasa por «borrador»—, las mismas líneas e impuestos **en
+negativo**, `SENT` + `PAID` con deuda cero, enlazada a la original
+(`rectified_invoice_id`, tipo AEAT `R1`). La original **no se toca**. Al crearla
+la ficha aterriza en ella, como al duplicar.
+
+> ⛔ **La tercera puerta no se puede saber desde fuera.** Solo puede haber una
+> rectificativa por factura, y el recurso no dice si ya existe. Así que se
+> ofrece y se enseña lo que conteste: el 422 trae dentro el número de la que
+> existe («Ya existe una factura rectificativa para esta factura
+> (FAC-R-000004)»), que es más útil que cualquier texto propio. Ojo al detalle
+> del cable: ese controlador responde con la clave `error`, no `message` — el
+> puente Rust rescata las dos, así que llega igual.
+
+⚖️ **Sin cuota, a propósito**: la ruta va sin `enforce.plan` porque emitir una
+rectificativa es una obligación legal, no una funcionalidad de pago. Cuenta para
+el contador del mes (es una fila de `invoices`) pero nunca se bloquea.
+
+> ⚠️ **Y una cosa que el ERP hoy NO hace: la rectificativa no se registra en
+> VeriFactu.** `createCreditNote` la inserta directamente como `SENT`, y el
+> único sitio que registra en la AEAT es la transición a `PUBLISHED`
+> (`ChangeInvoiceStatusController::registerInVeriFactu`). Nace, por tanto, sin
+> `aeat_status` — y la ficha no le pinta bloque VeriFactu, que es lo honesto:
+> enseñar uno vacío sería fingir un alta que no ocurrió. El arreglo es del lado
+> del ERP, no de aquí.
+
+## VeriFactu en la ficha
+
+El estado del registro en la AEAT es un **tercer eje**, ni el del documento ni
+el del cobro, y vive en `aeat_status` con su prueba (`aeat_csv`, `hash`,
+`qr_data`) — los cuatro ya vienen en `InvoiceResource`, así que la ficha no pide
+nada extra para enseñarlo.
+
+- **La insignia va en la cabecera**, junto a las otras dos, y es la única: el
+  bloque de abajo no la repite. Etiquetas y tonos son **los del panel**
+  (`helpers/invoice-status.js`), para que la misma factura no se vea «Rechazada»
+  en rojo en un sitio y en ámbar en el otro.
+- **Dónde va el bloque lo decide la urgencia** (`isAeatUrgent`): un rechazo o un
+  error suben justo bajo la cabecera, porque son lo más importante de la página;
+  lo que salió bien baja con las notas, porque es prueba documental. Es el
+  criterio del panel, que reserva su bloque tintado para el fallo.
+- **El motivo del rechazo no está en la factura**: sale de
+  `GET /invoices/{id}/verifactu/detail`, que consulta la API de VeriFactu. Se
+  pide **solo en los estados de fallo** —es una llamada de red hacia fuera— y
+  su `aeat_response` puede llegar como objeto o como cadena; se aplana a texto.
+
+### ⛔ Sin registro no hay nada que reintentar
+
+La regla que gobierna qué botones salen. `detail`, `sync` y `retry` contestan
+**422 «Invoice not registered in VeriFactu»** cuando la factura no tiene
+`verifactu_record_id`, y eso pasa en más casos de los que parece:
+
+| `aeat_status` | ¿Hay registro? | Qué se ofrece |
+|---|---|---|
+| `accepted` (+ `_with_warnings`) | Sí | Nada: solo la prueba (CSV, huella, QR) |
+| `queued`, `sent` | Sí | **Sincronizar** — está en vuelo y el estado local puede ser viejo |
+| `rejected` | Sí | **Reintentar** + Sincronizar, con la respuesta de la AEAT |
+| `error` | **Depende** | Se sondea antes de ofrecer nada |
+| `pending` | No | Nada: el ERP lo reintenta solo, y se dice |
+| `sandbox_only` | No | Nada: el plan no llega a producción |
+| `not_applicable` / vacío | — | El bloque no aparece |
+
+**`error` es ambiguo del servidor y hay que sondearlo.** Lo escriben dos sitios
+distintos: la AEAT rechazando un registro que existe, y el job
+`RetryVeriFactuRegistration` al agotar sus reintentos **sin llegar a crearlo**.
+La fila queda idéntica en los dos casos. Lo único que los distingue es el 422 de
+`/verifactu/detail`, así que la ficha lo pide y, mientras no conteste, no promete
+un botón que iría a fallar. Con registro ofrece reintentar; sin él explica que
+el alta no ocurrió y no ofrece nada, porque no hay nada que hacer desde aquí.
+
+⚠️ **Si el sondeo se cae** (red, o la API de VeriFactu apagada), se asume que
+**sí** hay registro y se ofrecen las acciones. Ante la duda, esconder el
+reintento deja al usuario sin la única salida de un rechazo; como mucho, el 422
+se lo cuenta un aviso. Es la misma elección del panel, que trata el detalle
+como *best-effort* y deja el bloque de fallo en pie pase lo que pase.
+
+### Una diferencia deliberada con el panel
+
+El panel Vue solo enseña los botones **en los estados de fallo**, así que una
+factura atascada en «En cola» no tiene desde dónde refrescarse. Aquí
+**«Sincronizar» sale también en vuelo** (`queued`, `sent`): releer el estado no
+cambia nada en la AEAT —solo trae lo que ya hay— y es justo cuando el dato local
+puede estar viejo. Reintentar, en cambio, sigue siendo solo del fallo: reenviar
+un registro aceptado no es una acción, es un error.
+
+Y VeriFactu **no está en el menú `…`**, que es la única vez que la ficha y la
+fila no ofrecen lo mismo. La razón: sus acciones dependen de un estado que solo
+se ve en la ficha —y de un sondeo que solo allí se hace—, así que ofrecerlas
+desde una fila sería pedir a ciegas.
 
 ## Los ladrillos
 
@@ -291,7 +391,8 @@ réplica de facturas va a heredar; ninguno sabe de dónde salen los datos.
 | `PimiaPageHeader` | La cabecera de una pantalla: título (30 px medium), descripción, acción primaria a la derecha y, opcionalmente, migas encima e insignias junto al título. |
 | `PimiaStatCards` | La tira de cifras sobre una lista. No calcula nada: se le pasan números que el servidor haya dicho, y una raya cuando no se saben. |
 | `PimiaSortableHead` | Cabecera que ordena **contra el servidor**, con su flecha de dirección. |
-| `PimiaStatusBadge` | Una insignia de estado con punto de color, por **tono semántico** (`neutral`/`info`/`success`/`warning`/`danger`), no por documento. Trae el mapa de estados de presupuesto (`ESTIMATE_STATUS_META`); facturas añadirá el suyo al lado. |
+| `PimiaStatusBadge` | Una insignia de estado con punto de color, por **tono semántico** (`neutral`/`info`/`success`/`warning`/`danger`), no por documento. Trae los tres mapas —presupuesto, factura y AEAT (`INVOICE_AEAT_META`)— y `PimiaVeriFactuBadge`, que es la insignia del tercer eje. |
+| `PimiaInvoiceVeriFactu` | El bloque VeriFactu de la ficha: el motivo del rechazo, la prueba del alta aceptada y los botones que el estado permita. Es quien aplica la regla de «sin registro no hay nada que reintentar». |
 | `PimiaAmountCell` | La celda de importe: céntimos → euros por `lib/money`, a la derecha y en `tabular-nums`. `PimiaAmount`, en el mismo fichero, es el importe suelto para fichas y totales. |
 | `PimiaFilterBar` | La fila de filtros: búsqueda con lupa, filtros extra como hijos y acciones al final. |
 | `PimiaStatusTabs` | Las pestañas de estado subrayadas, compuestas sobre el bloque `tabs` de Buzz sin tocar el primitivo. |
@@ -356,8 +457,22 @@ captura de la pantalla anterior—. Además de retratar, comprueba lo que solo s
 ve moviéndose: que tras un `POST /status` —que contesta `{success: true}` y no
 el documento— la ficha **relee** y la insignia cambia.
 
+**Rectificativas y VeriFactu** tienen el suyo,
+`pimia-invoice-verifactu.spec.ts` (`test-results/pimia-verifactu/`), separado
+por lo mismo: crea documentos nuevos y mueve el estado AEAT. Cubre los cinco
+estados que cambian lo que se ofrece, y el caso que solo se ve moviéndose: que
+tras `sync`/`retry` —que **no** devuelven la factura— la ficha relee y la
+insignia cambia.
+
 ⚠️ El mock (`tests/helpers/pimia.ts`) copia **la forma real** también en esto:
 `clone` devuelve el recurso nuevo, `convert-to-invoice` devuelve una factura con
 `invoice_number: null`, y el 403 de un permiso que falta llega **sin**
 `missing_scope`, como el de verdad. `installPimiaMock(page, {staleGrant: true})`
 reproduce un grant anterior a `invoices:write`.
+
+Y en lo de este pase, la forma real es sobre todo **la frontera del registro**:
+el mock devuelve 422 «Invoice not registered in VeriFactu» exactamente en los
+estados que no tienen `verifactu_record_id`, publicar estrena el `aeat_status`
+(porque es la transición que registra), y la rectificativa nace **sin** estado
+AEAT. Un mock que rellenara ese hueco dejaría pasar una UI que promete un alta
+que el ERP no hace.

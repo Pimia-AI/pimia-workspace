@@ -32,12 +32,16 @@ import {
 } from "@/features/pimia/api/estimates";
 import {
   cloneInvoice,
+  createCreditNote,
   getInvoice,
+  getInvoiceVeriFactu,
   listInvoices,
   markInvoiceSent,
   publishInvoice,
   recordInvoicePayment,
+  retryInvoiceVeriFactu,
   sendInvoice,
+  syncInvoiceVeriFactu,
   type ListInvoicesInput,
   type PimiaInvoiceMail,
   type PimiaInvoicePaymentDraft,
@@ -245,6 +249,58 @@ export function useRecordPimiaInvoicePayment() {
   return useMutation({
     mutationFn: (draft: PimiaInvoicePaymentDraft) =>
       recordInvoicePayment(draft),
+    onSuccess: invalidate,
+  });
+}
+
+/**
+ * Crea la rectificativa. Como `clone`, devuelve el documento nuevo para poder
+ * llevar a él — pero aquí además cambia el mundo alrededor (una fila más en la
+ * lista, otra en el contador del mes), así que se invalida el tenant entero.
+ */
+export function useCreatePimiaCreditNote() {
+  const invalidate = useInvalidateTenantData();
+  return useMutation({
+    mutationFn: (invoiceId: string) => createCreditNote(invoiceId),
+    onSuccess: invalidate,
+  });
+}
+
+/**
+ * El detalle remoto de VeriFactu, solo cuando hace falta.
+ *
+ * `enabled` lo decide la ficha: se pide únicamente en los estados de fallo,
+ * que es donde vive el motivo. Sale de la API de VeriFactu a través del ERP —
+ * una llamada de red hacia fuera— así que no se pide «por si acaso», y su
+ * resultado no se reintenta solo: un fallo aquí deja el bloque en pie con su
+ * mensaje, como en el panel.
+ */
+export function usePimiaInvoiceVeriFactuQuery(
+  invoiceId: string | undefined,
+  enabled: boolean,
+) {
+  const tenant = useActivePimiaTenant();
+
+  return useQuery({
+    queryKey: dataKey(tenant?.id, "invoiceVeriFactu", invoiceId),
+    queryFn: () => getInvoiceVeriFactu(invoiceId as string),
+    enabled: Boolean(tenant) && Boolean(invoiceId) && enabled,
+    retry: false,
+  });
+}
+
+export function useSyncPimiaInvoiceVeriFactu() {
+  const invalidate = useInvalidateTenantData();
+  return useMutation({
+    mutationFn: (invoiceId: string) => syncInvoiceVeriFactu(invoiceId),
+    onSuccess: invalidate,
+  });
+}
+
+export function useRetryPimiaInvoiceVeriFactu() {
+  const invalidate = useInvalidateTenantData();
+  return useMutation({
+    mutationFn: (invoiceId: string) => retryInvoiceVeriFactu(invoiceId),
     onSuccess: invalidate,
   });
 }
