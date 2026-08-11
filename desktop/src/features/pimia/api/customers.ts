@@ -75,6 +75,14 @@ export async function listCustomers(
   const payload = await pimiaRequest<unknown>({
     path: "/customers",
     query: {
+      // Opt-in a la vista ligera del índice (`view=summary`, factSaas #339):
+      // nombre, contacto, NIF, saldo pendiente neto en céntimos y fechas; sin
+      // direcciones, campos personalizados, empresa, moneda ni método de pago,
+      // y sin el avatar, que en el servidor costaba una consulta por fila.
+      // Baja la página de ~88-98 KB a ~13 KB. Un servidor que aún no conoce el
+      // parámetro lo ignora y responde la vista completa, así que este opt-in
+      // puede desplegarse por delante de la plataforma.
+      view: "summary",
       page: input.page,
       limit: input.limit,
       search: input.search?.trim() || undefined,
