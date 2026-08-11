@@ -14,7 +14,10 @@
  * 3. **`due_amount`** es lo pendiente de cobro, y `overdue` lo calcula el
  *    servidor (vencida y sin pagar del todo). Aquí no se recalcula ninguno.
  * 4. **`is_credit_note`**: las rectificativas viven en la misma tabla y salen
- *    en el mismo índice. Se señalan, no se esconden.
+ *    en el mismo índice. Se señalan, no se esconden. Y en la factura que
+ *    corrigen, los `effective_*` dicen lo que queda **neto** de ellas: el
+ *    nominal es el importe legal del documento, el efectivo es lo que de
+ *    verdad se debe.
  * 5. **Un tercer eje: el estado en la AEAT** (`aeat_status`), que no es ni el
  *    del documento ni el del cobro. Con su prueba (`aeat_csv`, `hash`,
  *    `qr_data`) cuando la AEAT aceptó el registro — pero eso solo en la ficha:
@@ -151,6 +154,29 @@ export type PimiaInvoice = {
   totalCents: number | null;
   /** Lo pendiente de cobro, en céntimos. */
   dueCents: number | null;
+  /**
+   * El total **neto de rectificativas** (`effective_total`): el nominal menos
+   * lo que le hayan rectificado. Igual a `totalCents` mientras no haya
+   * ninguna, y es lo que impide que una factura anulada del todo se siga
+   * leyendo por su importe original.
+   *
+   * ⚠️ En una **rectificativa** es su propio importe en negativo, no cero: el
+   * servidor sirve estos campos por accessor, y el accessor devuelve el total
+   * tal cual cuando `is_credit_note`.
+   */
+  effectiveTotalCents: number | null;
+  /** Lo pendiente de cobro neto de rectificativas (`effective_due_amount`). */
+  effectiveDueCents: number | null;
+  /**
+   * Vencida **y con saldo neto pendiente** (`effective_overdue`): una factura
+   * rectificada del todo está vencida sobre el papel, pero no debe nada.
+   *
+   * El servidor manda también `effective_paid_status`, que aquí NO se usa: en
+   * una factura anulada vale `PAID`, y eso significa «no queda saldo», no «se
+   * cobró». Pintar «Pagada» sobre una factura que nadie pagó sería mentir, así
+   * que la insignia de cobro se queda con el `paid_status` nominal.
+   */
+  effectiveOverdue: boolean | null;
   /** Ruta pública por hash, como la del presupuesto: sin token ni scope. */
   pdfUrl: string | null;
   /** El eje AEAT. `null` en un borrador: aún no hay nada que registrar. */
@@ -209,6 +235,12 @@ function normalizeInvoice(raw: RawInvoice): PimiaInvoice {
     taxCents: readCents(raw.tax),
     totalCents: readCents(raw.total),
     dueCents: readCents(raw.due_amount),
+    effectiveTotalCents: readCents(raw.effective_total),
+    effectiveDueCents: readCents(raw.effective_due_amount),
+    // `null` cuando no viene, para que la insignia sepa distinguir «el
+    // servidor dice que no» de «el servidor no lo dijo» y caiga en `overdue`.
+    effectiveOverdue:
+      typeof raw.effective_overdue === "boolean" ? raw.effective_overdue : null,
     pdfUrl: text(raw.invoice_pdf_url),
     aeatStatus: text(raw.aeat_status),
     aeatCsv: text(raw.aeat_csv),

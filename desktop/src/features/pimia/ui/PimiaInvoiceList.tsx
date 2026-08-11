@@ -9,7 +9,11 @@
  *   borrador no se le debe nada.
  * - **El importe enseña debajo lo pendiente**, que es la cifra que se mira en
  *   una factura — la base ya la enseña la ficha.
- * - Las **rectificativas** se señalan junto al número, no se esconden.
+ * - Las **rectificativas** se señalan junto al número, no se esconden. Y la
+ *   factura que corrigen también: cuando el neto de rectificativas no coincide
+ *   con el nominal, la fila lo dice y enseña debajo el neto. La cifra grande
+ *   sigue siendo la nominal a propósito — es el importe legal del documento, y
+ *   es por la que ordena el servidor.
  */
 
 import { Copy, FileText, User } from "lucide-react";
@@ -131,91 +135,116 @@ export function PimiaInvoiceList({
         </TableRow>
       </TableHeader>
       <TableBody>
-        {invoices.map((invoice) => (
-          <TableRow
-            data-testid={`pimia-invoice-${invoice.id}`}
-            key={invoice.id}
-          >
-            <TableCell className="whitespace-nowrap py-2.5 pl-3">
-              {invoice.invoiceNumber ? (
-                onOpen ? (
+        {invoices.map((invoice) => {
+          // Neto de rectificativas. `effective_*` los precalcula el servidor;
+          // cuando no vienen (un servidor sin la vista ligera de facturas), se
+          // cae al nominal y la fila se pinta exactamente como antes.
+          const isRectified =
+            invoice.effectiveTotalCents !== null &&
+            invoice.effectiveTotalCents !== invoice.totalCents;
+          const pendingCents = invoice.effectiveDueCents ?? invoice.dueCents;
+
+          return (
+            <TableRow
+              data-testid={`pimia-invoice-${invoice.id}`}
+              key={invoice.id}
+            >
+              <TableCell className="whitespace-nowrap py-2.5 pl-3">
+                {invoice.invoiceNumber ? (
+                  onOpen ? (
+                    <button
+                      className="rounded-sm font-mono font-medium text-foreground outline-hidden hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                      data-testid={`pimia-invoice-open-${invoice.id}`}
+                      onClick={() => onOpen(invoice.id)}
+                      type="button"
+                    >
+                      {invoice.invoiceNumber}
+                    </button>
+                  ) : (
+                    <span className="font-mono font-medium text-foreground">
+                      {invoice.invoiceNumber}
+                    </span>
+                  )
+                ) : (
+                  // El número no existe hasta publicar. El borrador se abre
+                  // igual, pero no se le inventa un identificador.
                   <button
-                    className="rounded-sm font-mono font-medium text-foreground outline-hidden hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                    className="rounded-sm text-muted-foreground outline-hidden hover:underline focus-visible:ring-2 focus-visible:ring-ring"
                     data-testid={`pimia-invoice-open-${invoice.id}`}
-                    onClick={() => onOpen(invoice.id)}
+                    onClick={onOpen ? () => onOpen(invoice.id) : undefined}
                     type="button"
                   >
-                    {invoice.invoiceNumber}
+                    Sin numerar
                   </button>
-                ) : (
-                  <span className="font-mono font-medium text-foreground">
-                    {invoice.invoiceNumber}
+                )}
+                {invoice.isCreditNote ? (
+                  <span className="ml-2 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Rectificativa
                   </span>
-                )
-              ) : (
-                // El número no existe hasta publicar. El borrador se abre
-                // igual, pero no se le inventa un identificador.
-                <button
-                  className="rounded-sm text-muted-foreground outline-hidden hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-                  data-testid={`pimia-invoice-open-${invoice.id}`}
-                  onClick={onOpen ? () => onOpen(invoice.id) : undefined}
-                  type="button"
-                >
-                  Sin numerar
-                </button>
-              )}
-              {invoice.isCreditNote ? (
-                <span className="ml-2 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Rectificativa
-                </span>
-              ) : null}
-            </TableCell>
-            {showCustomer ? (
-              <TableCell className="max-w-0 truncate py-2.5 font-medium text-foreground">
-                {invoice.customerName ?? "—"}
+                ) : null}
+                {/* El otro extremo del mismo enlace: la factura corregida. */}
+                {isRectified ? (
+                  <span className="ml-2 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Rectificada
+                  </span>
+                ) : null}
               </TableCell>
-            ) : null}
-            <TableCell className="whitespace-nowrap py-2.5 text-muted-foreground">
-              {formatDate(invoice.invoiceDate)}
-            </TableCell>
-            <TableCell className="whitespace-nowrap py-2.5 text-muted-foreground">
-              {formatDate(invoice.dueDate)}
-            </TableCell>
-            <TableCell className="py-2.5">
-              <PimiaInvoiceStatusBadge status={invoice.status} />
-            </TableCell>
-            <TableCell className="py-2.5">
-              {invoice.status === "DRAFT" ? (
-                <span className="text-muted-foreground">—</span>
-              ) : (
-                <PimiaInvoicePaidBadge
-                  isOverdue={invoice.isOverdue}
-                  paidStatus={invoice.paidStatus}
-                />
-              )}
-            </TableCell>
-            <PimiaAmountCell
-              cents={invoice.totalCents}
-              className="py-2.5"
-              hint={
-                // Solo cuando la deuda no es ni cero ni el total entero: en
-                // esos dos la cifra de arriba ya lo dice todo.
-                invoice.dueCents !== null &&
-                invoice.dueCents > 0 &&
-                invoice.dueCents !== invoice.totalCents
-                  ? `Pendiente ${formatCents(invoice.dueCents)}`
-                  : undefined
-              }
-            />
-            <TableCell className="py-2.5 pr-2 text-right">
-              <PimiaInvoiceRowActions
-                invoice={invoice}
-                onOpen={onOpen}
-                onOpenCustomer={onOpenCustomer}
+              {showCustomer ? (
+                <TableCell className="max-w-0 truncate py-2.5 font-medium text-foreground">
+                  {invoice.customerName ?? "—"}
+                </TableCell>
+              ) : null}
+              <TableCell className="whitespace-nowrap py-2.5 text-muted-foreground">
+                {formatDate(invoice.invoiceDate)}
+              </TableCell>
+              <TableCell className="whitespace-nowrap py-2.5 text-muted-foreground">
+                {formatDate(invoice.dueDate)}
+              </TableCell>
+              <TableCell className="py-2.5">
+                <PimiaInvoiceStatusBadge status={invoice.status} />
+              </TableCell>
+              <TableCell className="py-2.5">
+                {invoice.status === "DRAFT" ? (
+                  <span className="text-muted-foreground">—</span>
+                ) : (
+                  // La insignia roja mira el vencimiento NETO: una factura
+                  // rectificada del todo está vencida sobre el papel y no debe
+                  // nada. El estado de cobro se queda nominal — el
+                  // `effective_paid_status` diría «Pagada» de algo que nadie
+                  // pagó.
+                  <PimiaInvoicePaidBadge
+                    isOverdue={invoice.effectiveOverdue ?? invoice.isOverdue}
+                    paidStatus={invoice.paidStatus}
+                  />
+                )}
+              </TableCell>
+              <PimiaAmountCell
+                cents={invoice.totalCents}
+                className="py-2.5"
+                hint={
+                  // Rectificada: la cifra de arriba es el importe legal del
+                  // documento y aquí va lo que queda de él, que es lo que se
+                  // cobra. Si no, lo pendiente — y solo cuando no es ni cero ni
+                  // el total entero: en esos dos la cifra de arriba ya lo dice.
+                  isRectified
+                    ? `Neto ${formatCents(invoice.effectiveTotalCents)}`
+                    : pendingCents !== null &&
+                        pendingCents > 0 &&
+                        pendingCents !== invoice.totalCents
+                      ? `Pendiente ${formatCents(pendingCents)}`
+                      : undefined
+                }
               />
-            </TableCell>
-          </TableRow>
-        ))}
+              <TableCell className="py-2.5 pr-2 text-right">
+                <PimiaInvoiceRowActions
+                  invoice={invoice}
+                  onOpen={onOpen}
+                  onOpenCustomer={onOpenCustomer}
+                />
+              </TableCell>
+            </TableRow>
+          );
+        })}
       </TableBody>
       {typeof totalCents === "number" ? (
         <TableFooter>
