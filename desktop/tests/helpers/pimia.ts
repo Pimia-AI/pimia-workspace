@@ -748,6 +748,120 @@ export async function installPimiaMock(
       const allInvoices = opts.empty ? [] : [...invoices];
 
       /**
+       * El precálculo de rectificativas del servidor
+       * —`withCreditNoteAdjustments()` más los accessores `effective*` de
+       * `Invoice`—, para que la fila del mock diga lo mismo que la de la API.
+       * Se deriva en cada respuesta y no se fija en el fixture: así una
+       * rectificativa creada durante una prueba mueve el neto de la factura
+       * que corrige, igual que en el ERP.
+       *
+       * ⚠️ En una **rectificativa** el efectivo es su propio importe en
+       * negativo, no cero: el accessor devuelve el total tal cual cuando
+       * `is_credit_note`. Comprobado contra el tenant de dev (2026-08-11):
+       * `total=-10000` → `effective_total=-10000`.
+       */
+      const withEffectiveAmounts = (
+        row: RawInvoice,
+        all: RawInvoice[],
+      ): RawInvoice & {
+        effective_total: number;
+        effective_due_amount: number;
+        effective_paid_status: string;
+        effective_overdue: boolean;
+      } => {
+        // Solo cuentan las rectificativas numeradas, como `whereNumbered()`.
+        const creditedTotal = row.is_credit_note
+          ? 0
+          : all
+              .filter(
+                (candidate) =>
+                  candidate.is_credit_note &&
+                  candidate.invoice_number &&
+                  candidate.rectified_invoice_id === row.id,
+              )
+              .reduce((sum, candidate) => sum + candidate.total, 0);
+        const due = Number(row.due_amount);
+        const effectiveTotal = row.is_credit_note
+          ? row.total
+          : Math.max(0, row.total + creditedTotal);
+        const effectiveDue = row.is_credit_note
+          ? Math.max(0, due)
+          : Math.max(0, due + creditedTotal);
+        // `resolvePaidStatusFromAmounts`, tal cual.
+        const effectivePaidStatus =
+          effectiveTotal <= 0 || effectiveDue <= 0
+            ? "PAID"
+            : effectiveDue >= effectiveTotal
+              ? "UNPAID"
+              : "PARTIALLY_PAID";
+
+        return {
+          ...row,
+          effective_total: effectiveTotal,
+          effective_due_amount: effectiveDue,
+          effective_paid_status: effectivePaidStatus,
+          // El servidor compara la fecha; aquí `overdue` ya significa «vencida
+          // y sin cobrar del todo», así que pone esa mitad y el neto la otra.
+          effective_overdue:
+            row.overdue && effectivePaidStatus !== "PAID" && effectiveDue > 0,
+        };
+      };
+
+      /**
+       * La fila de `GET /invoices?view=summary` — `InvoiceSummaryResource`, con
+       * sus campos y **solo** los suyos.
+       *
+       * Que el mock recorte de verdad es el punto: si siguiera devolviendo el
+       * documento entero, las specs pasarían sobre un contrato que la app ya no
+       * recibe, y una pantalla que leyera las líneas desde el índice se
+       * descubriría en producción.
+       */
+      const invoiceSummaryRow = (row: RawInvoice) => {
+        const full = withEffectiveAmounts(row, allInvoices);
+        const owner = allCustomers.find(
+          (candidate) => candidate.id === row.customer_id,
+        );
+
+        return {
+          id: full.id,
+          invoice_date: full.invoice_date,
+          due_date: full.due_date,
+          invoice_number: full.invoice_number,
+          reference_number: full.invoice_number ? `OBRA-${full.id}` : null,
+          status: full.status,
+          paid_status: full.paid_status,
+          overdue: full.overdue,
+          is_credit_note: full.is_credit_note,
+          rectified_invoice_id: full.rectified_invoice_id ?? null,
+          sub_total: full.sub_total,
+          discount_val: 0,
+          tax: full.tax,
+          total: full.total,
+          due_amount: full.due_amount,
+          effective_total: full.effective_total,
+          effective_due_amount: full.effective_due_amount,
+          effective_paid_status: full.effective_paid_status,
+          effective_overdue: full.effective_overdue,
+          currency_id: 1,
+          customer_id: full.customer_id,
+          external_ref: null,
+          invoice_pdf_url: full.invoice_pdf_url,
+          aeat_status: full.aeat_status,
+          // La vista ligera trae del cliente lo justo para la columna y para
+          // prefijar el destinatario del envío: sin `email`, el diálogo saldría
+          // vacío desde una fila.
+          customer: owner
+            ? {
+                id: owner.id,
+                name: owner.name,
+                email: owner.email,
+                phone: owner.phone,
+              }
+            : full.customer,
+        };
+      };
+
+      /**
        * Igual que responde Pimia, con su trampa incluida: el `meta` lleva a la
        * vez el total del **paginador** (que sí filtra) y el
        * `<recurso>_total_count` del controlador, que es el de la empresa
@@ -1358,7 +1472,12 @@ export async function installPimiaMock(
                 ),
             );
           }
-          return listPayload(rows, allInvoices, "invoice_total_count", query);
+          // `?view=summary`: la app pide la fila del listado, no el documento.
+          // Se proyecta DESPUÉS de filtrar y ordenar, que es lo que hace el
+          // controlador: el recorte es de la respuesta, no de la consulta.
+          const shaped =
+            query.view === "summary" ? rows.map(invoiceSummaryRow) : rows;
+          return listPayload(shaped, allInvoices, "invoice_total_count", query);
         }
 
         // ⚠️ Antes del `startsWith("/invoices/")` de abajo, que si no se traga
@@ -1414,7 +1533,9 @@ export async function installPimiaMock(
           );
           return {
             data: {
-              ...found,
+              // La ficha también los lleva (`InvoiceResource`): el neto no es
+              // cosa de la vista ligera, es cosa del documento.
+              ...withEffectiveAmounts(found, allInvoices),
               reference_number: found.invoice_number
                 ? `OBRA-${found.id}`
                 : null,
