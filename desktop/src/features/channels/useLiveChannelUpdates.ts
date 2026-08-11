@@ -443,6 +443,14 @@ export function useLiveChannelUpdates(
   // The ref survives re-renders so churn-with-identical-IDs does zero work.
   const mentionSubsRef = React.useRef(new Map<string, () => Promise<void>>());
   const mentionSubsPubkeyRef = React.useRef<string | null>(null);
+  // The backoff counter lives in a ref for the same reason the subs do: this
+  // effect re-runs whenever its deps churn (a relay-wide query invalidation
+  // re-resolves the channel list every 15s while the relay is refusing us).
+  // Effect-local state would reset the delay to the 1s base on every re-run,
+  // so a relay answering `restricted: not a relay member` gets re-dialled per
+  // channel roughly once a second, forever, instead of settling at the 30s
+  // ceiling the way the live-channel effect above does.
+  const mentionRetryAttemptRef = React.useRef(0);
 
   React.useEffect(() => {
     if (!options.onLiveMention || normalizedCurrentPubkey.length === 0) {
@@ -451,7 +459,6 @@ export function useLiveChannelUpdates(
 
     let isCancelled = false;
     let retryTimeout: number | undefined;
-    let retryAttempt = 0;
 
     const syncSubs = async (): Promise<boolean> => {
       const activeSubs = mentionSubsRef.current;
@@ -513,14 +520,14 @@ export function useLiveChannelUpdates(
       const ok = await syncSubs();
       if (isCancelled) return;
       if (ok) {
-        retryAttempt = 0;
+        mentionRetryAttemptRef.current = 0;
         return;
       }
       const delayMs = Math.min(
-        LIVE_SUBSCRIPTION_RETRY_BASE_MS * 2 ** retryAttempt,
+        LIVE_SUBSCRIPTION_RETRY_BASE_MS * 2 ** mentionRetryAttemptRef.current,
         LIVE_SUBSCRIPTION_RETRY_MAX_MS,
       );
-      retryAttempt += 1;
+      mentionRetryAttemptRef.current += 1;
       retryTimeout = window.setTimeout(() => {
         retryTimeout = undefined;
         void runSync();
