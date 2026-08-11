@@ -19,6 +19,7 @@ import { Toaster } from "@/shared/ui/sonner";
 import { TooltipProvider } from "@/shared/ui/tooltip";
 import { recoverLocalStorageQuotaOnStartup } from "@/shared/lib/localStorageQuota";
 import { startLocalStorageSweep } from "@/shared/lib/localStorageSweep";
+import { installTauriUnlistenGuard } from "@/shared/lib/tauriUnlistenGuard";
 
 type E2eWindow = Window & {
   __BUZZ_E2E__?: unknown;
@@ -123,6 +124,8 @@ async function bootstrap() {
   resetDevWebviewStateFromUrl();
   configureDevE2eBridgeFromUrl();
   recoverLocalStorageQuotaOnStartup();
+  // Before the first render, so no effect can subscribe ahead of the guard.
+  installTauriUnlistenGuard();
   startLocalStorageSweep();
   await installE2eBridgeIfConfigured();
   await migrateLegacyCommunityStorageBeforeRender();
