@@ -94,6 +94,65 @@ test("una factura que ya tiene rectificativa lo dice con su número", async ({
   await shoot(page, "rectificativa-ya-existe");
 });
 
+test("la factura rectificada dice cuánto queda neto de ella", async ({
+  page,
+}) => {
+  await boot(page);
+  await page.getByTestId("pimia-nav-invoices").click();
+  await expect(page.getByTestId("pimia-invoice-list")).toBeVisible();
+
+  // FAC-000053 (764,50 €) la corrige en parte FAC-R-000004 (-589,00 €). La
+  // cifra grande sigue siendo la nominal —es el importe legal del documento— y
+  // debajo va lo que queda: 175,50 €.
+  const rectificada = page.getByTestId("pimia-invoice-85");
+  await expect(rectificada).toContainText("Rectificada");
+  await expect(rectificada).toContainText("764,50");
+  await expect(rectificada).toContainText("Neto 175,50");
+
+  // La rectificativa no se marca a sí misma: su efectivo es su propio importe
+  // en negativo, no cero.
+  const rectificativa = page.getByTestId("pimia-invoice-84");
+  await expect(rectificativa).toContainText("Rectificativa");
+  await expect(rectificativa).not.toContainText("Rectificada");
+  await expect(rectificativa).not.toContainText("Neto");
+
+  await shoot(page, "fila-rectificada");
+});
+
+test("rectificar una vencida le apaga el rojo, porque ya no se debe nada", async ({
+  page,
+}) => {
+  await boot(page);
+  await page.getByTestId("pimia-nav-invoices").click();
+  await expect(page.getByTestId("pimia-invoice-list")).toBeVisible();
+
+  // FAC-000055: vencida y sin cobrar, 2.899,00 € pendientes.
+  const vencida = page.getByTestId("pimia-invoice-87");
+  await expect(vencida).toContainText("Vencida");
+
+  await openInvoice(page, "87");
+  await page.getByTestId("pimia-invoice-actions-87").click();
+  await page.getByRole("menuitem", { name: "Crear rectificativa" }).click();
+  await page
+    .getByRole("button", { name: "Crear rectificativa", exact: true })
+    .click();
+  await expect(page.getByRole("heading", { name: /FAC-R-\d+/ })).toBeVisible();
+
+  await page.getByTestId("pimia-nav-invoices").click();
+  await expect(page.getByTestId("pimia-invoice-list")).toBeVisible();
+
+  // Rectificada del todo: el saldo neto es cero, así que deja de estar en rojo
+  // —pero NO pasa a «Pagada»: nadie la pagó, y el estado de cobro es el
+  // nominal.
+  await expect(vencida).toContainText("Rectificada");
+  await expect(vencida).toContainText("Neto 0,00");
+  await expect(vencida).not.toContainText("Vencida");
+  await expect(vencida).toContainText("Pendiente");
+  await expect(vencida).not.toContainText("Pagada");
+
+  await shoot(page, "vencida-rectificada");
+});
+
 test("ni un borrador ni una rectificativa ofrecen rectificar", async ({
   page,
 }) => {

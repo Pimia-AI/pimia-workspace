@@ -167,8 +167,12 @@ export function PimiaInvoicesScreen() {
   const invoices = query.data?.invoices ?? [];
   const lastPage = query.data?.pagination?.lastPage ?? 1;
   const totalCount = query.data?.totalCount ?? null;
+  // Suma el importe NETO de rectificativas, que es el dinero que hay de
+  // verdad en la página: una factura anulada aporta cero, no su nominal. Sin
+  // los `effective_*` (servidor sin la vista ligera) se cae al nominal.
   const totalCents = invoices.reduce(
-    (total, invoice) => total + (invoice.totalCents ?? 0),
+    (total, invoice) =>
+      total + (invoice.effectiveTotalCents ?? invoice.totalCents ?? 0),
     0,
   );
 
