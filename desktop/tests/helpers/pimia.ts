@@ -748,6 +748,28 @@ export async function installPimiaMock(
       const allInvoices = opts.empty ? [] : [...invoices];
 
       /**
+       * La fila de `GET /customers?view=summary` — `CustomerSummaryResource`
+       * reducido a los campos que este mock modela, y **solo** a esos.
+       *
+       * Lo que la vista ligera deja fuera en el servidor (direcciones, campos
+       * personalizados, empresa, moneda, método de pago y el avatar) nunca
+       * estuvo en el fixture, así que el recorte no cambia lo que ven las
+       * specs; existe para que se note el día que una pantalla lea del índice
+       * algo que la vista ligera no trae.
+       */
+      const customerSummaryRow = (row: RawCustomer) => ({
+        id: row.id,
+        name: row.name,
+        email: row.email,
+        phone: row.phone,
+        company_name: row.company_name,
+        contact_name: row.contact_name,
+        tax_id: row.tax_id,
+        due_amount: row.due_amount,
+        created_at: row.created_at,
+      });
+
+      /**
        * El precálculo de rectificativas del servidor
        * —`withCreditNoteAdjustments()` más los accessores `effective*` de
        * `Invoice`—, para que la fila del mock diga lo mismo que la de la API.
@@ -1320,7 +1342,20 @@ export async function installPimiaMock(
                   .includes(search),
               )
             : allCustomers;
-          return listPayload(rows, allCustomers, "customer_total_count", query);
+          // `?view=summary`: la app pide la fila del listado, no la ficha.
+          // `CustomerSummaryResource` sirve además campos que este mock no
+          // modela (moneda, método de pago, saldo base, referencia externa);
+          // aquí se recorta a lo que la app lee de verdad, y el recorte es el
+          // punto: una pantalla que empezara a leer del índice algo que la
+          // vista ligera no trae se descubriría aquí y no en producción.
+          const payloadRows =
+            query.view === "summary" ? rows.map(customerSummaryRow) : rows;
+          return listPayload(
+            payloadRows,
+            allCustomers,
+            "customer_total_count",
+            query,
+          );
         }
 
         if (clean.startsWith("/customers/")) {
