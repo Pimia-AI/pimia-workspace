@@ -17,7 +17,8 @@
  *    en el mismo índice. Se señalan, no se esconden.
  * 5. **Un tercer eje: el estado en la AEAT** (`aeat_status`), que no es ni el
  *    del documento ni el del cobro. Con su prueba (`aeat_csv`, `hash`,
- *    `qr_data`) cuando la AEAT aceptó el registro.
+ *    `qr_data`) cuando la AEAT aceptó el registro — pero eso solo en la ficha:
+ *    el índice lleva el estado, no el expediente.
  *
  * Los impuestos y las líneas tienen la misma forma de cable que en
  * presupuestos, así que se reutilizan sus tipos y su normalizador — un solo
@@ -138,7 +139,9 @@ export type PimiaInvoice = {
   customerName: string | null;
   customerEmail: string | null;
   customerPhone: string | null;
+  /** Solo en el detalle: el índice no trae el cuerpo del documento. */
   notes: string | null;
+  /** Solo en el detalle, como `lines`. */
   taxes: PimiaEstimateTax[] | null;
   /** Solo en el detalle, y `null` es «no se pidieron», no «no tiene». */
   lines: PimiaEstimateLine[] | null;
@@ -152,11 +155,11 @@ export type PimiaInvoice = {
   pdfUrl: string | null;
   /** El eje AEAT. `null` en un borrador: aún no hay nada que registrar. */
   aeatStatus: PimiaInvoiceAeatStatus | string | null;
-  /** El CSV que devuelve la AEAT al aceptar el registro. */
+  /** El CSV que devuelve la AEAT al aceptar el registro. Solo en el detalle. */
   aeatCsv: string | null;
-  /** La huella encadenada del registro VeriFactu. */
+  /** La huella encadenada del registro VeriFactu. Solo en el detalle. */
   aeatHash: string | null;
-  /** URL de verificación en la sede de la AEAT (el QR de la factura). */
+  /** URL de verificación en la sede de la AEAT (el QR). Solo en el detalle. */
   aeatQrUrl: string | null;
 };
 
@@ -242,6 +245,15 @@ export async function listInvoices(
   const payload = await pimiaRequest<unknown>({
     path: "/invoices",
     query: {
+      // Opt-in a la vista ligera del índice (`view=summary`, factSaas #334):
+      // la cabecera con los tres ejes de estado —documento, cobro y AEAT—,
+      // los importes en céntimos, customer {id, name, email, phone} y la URL
+      // del PDF; sin líneas, impuestos, notas ni las pruebas del registro
+      // AEAT, que solo lee la ficha (`getInvoice`). Baja la página de
+      // ~480-670 KB a ~19 KB. Un servidor que aún no conoce el parámetro lo
+      // ignora y responde la vista completa, así que este opt-in puede
+      // desplegarse por delante de la plataforma.
+      view: "summary",
       page: input.page,
       limit: input.limit,
       search: input.search?.trim() || undefined,
