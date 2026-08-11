@@ -24,6 +24,9 @@ name: Docker image
 #   - pull_request           → build only (no push), cache stays warm
 #   - workflow_dispatch      → manual relay-tag rescue at the tag itself
 #
+# Divergencia Pimia: en este fork el workflow entero está apagado tras la
+# variable `CI_RELAY_IMAGE`, PRs incluidos. Ver el comentario del job `build`.
+#
 # Why workflow_dispatch carries a version input:
 #   Normal releases arrive through the push:tags trigger above. The input is
 #   retained only for an operator to rerun publication manually at an immutable
@@ -82,6 +85,35 @@ jobs:
   build:
     name: Build (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
+    # Divergencia Pimia: la publicación de las imágenes de este workflow queda
+    # apagada en el fork. `IMAGE_NAME` apunta a `ghcr.io/block/buzz`, que es de
+    # Block, y el push fallaba con `denied: permission_denied: The requested
+    # installation does not exist`. El disparador de `push` no lleva filtro de
+    # rutas, así que esto se caía en TODOS los merges a main.
+    #
+    # Tampoco hay quien consuma la imagen: usamos el relay alojado por Block
+    # (`communities.buzz.xyz`), no uno propio — ver docs/UPSTREAM.md, «La
+    # estrategia: merge periódico por release».
+    #
+    # Los builds de pull request tampoco se salvaban, y el motivo no se ve en
+    # el `push=false` que lleva `build-push-action`: es el `cache-to`. Está
+    # habilitado cuando el PR sale de una rama del propio repo, y escribe la
+    # caché en `${IMAGE_NAME}-buildcache:<arch>` — o sea, también en el GHCR de
+    # Block. De ahí `error writing layer blob: denied: permission_denied`. Los
+    # runs de PR de este workflow llevaban en rojo desde el 2026-08-08.
+    # Por eso el gate NO exceptúa `pull_request`: no había cobertura verde que
+    # preservar, solo seis checks en rojo por PR.
+    #
+    # `CI_RELAY_IMAGE` gobierna los dos pares de jobs del fichero (el relay y
+    # el push gateway). Se reactiva **sin tocar código**, y para que sirva de
+    # algo hay que apuntar antes las imágenes a un namespace propio:
+    #   gh variable set GHCR_IMAGE --repo Pimia-AI/pimia-workspace \
+    #     --body ghcr.io/pimia-ai/buzz
+    #   gh variable set CI_RELAY_IMAGE --repo Pimia-AI/pimia-workspace --body true
+    #
+    # Es el día que se ejerza la «válvula de escape» de UPSTREAM.md: autoalojar
+    # el relay y dejar de seguir el calendario de Block.
+    if: vars.CI_RELAY_IMAGE == 'true'
     timeout-minutes: 60
     permissions:
       contents: read
@@ -343,6 +375,10 @@ jobs:
   push-gateway-build:
     name: Build public push gateway (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
+    # Divergencia Pimia: misma variable y mismo motivo que el job `build` de
+    # arriba — `ghcr.io/block/buzz-push-gateway` también es de Block. El
+    # razonamiento completo está allí.
+    if: vars.CI_RELAY_IMAGE == 'true'
     timeout-minutes: 60
     permissions:
       contents: read

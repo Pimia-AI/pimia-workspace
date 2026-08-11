@@ -13,6 +13,9 @@ name: Sprig
 #   - push to main     → updates rolling `sprig-latest` release
 #   - tag `sprig-v*`  → versioned release
 #   - workflow_dispatch → manual canary build (no release publish unless asked)
+#
+# Divergencia Pimia: en este fork la publicación está apagada tras la variable
+# `CI_SPRIG_RELEASE` — solo se construye. Ver el comentario del job `publish`.
 
 on:
   push:
@@ -108,9 +111,27 @@ jobs:
   publish:
     name: Publish rolling release
     needs: build
-    if: |
-      github.event_name == 'push' && github.ref == 'refs/heads/main'
-      || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    # Divergencia Pimia: la release rodante queda apagada en el fork. El paso
+    # hace `gh release edit sprig-latest`, y esa release es de upstream: aquí
+    # no existe —ni el tag `sprig-latest` llegó a `origin`—, así que el job
+    # fallaba con «release not found» en TODOS los merges a main.
+    #
+    # No se arregla creando la release, porque nadie la consumiría: Sprig es el
+    # binario de Linux para agentes en contenedor, y en este fork los agentes
+    # corren en local en el Mac (docs/UPSTREAM.md, «El estado fuera del repo»).
+    # El backend de Kubernetes usa la *imagen* de Block, clavada por digest en
+    # `crates/buzz-backend-kubernetes/src/config.rs`, no este tarball.
+    #
+    # Se reactiva **sin tocar código**, definiendo la variable de repositorio:
+    #   gh variable set CI_SPRIG_RELEASE --repo Pimia-AI/pimia-workspace --body true
+    #
+    # El job `build` se deja encendido a propósito: es verde y compila los
+    # crates de agente contra musl estático, cobertura que `ci.yml` (glibc) no
+    # da. Lo único que se apaga es la publicación.
+    if: >-
+      vars.CI_SPRIG_RELEASE == 'true' &&
+      (github.event_name == 'push' && github.ref == 'refs/heads/main'
+      || (github.event_name == 'workflow_dispatch' && inputs.publish))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
