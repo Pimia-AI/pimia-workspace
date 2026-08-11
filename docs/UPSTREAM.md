@@ -1034,3 +1034,105 @@ bloqueos de permiso.
 **Qué vigilar en cada merge.** Upstream sigue iterando sobre permisos del
 arnés. Si aterriza un modelo *con política configurable* (no todo-o-nada),
 evaluar adoptarlo para recuperar frontera de comandos vía configuración.
+
+### 2026-08-11 — Lo que publica a la infraestructura de Block sale del ciclo
+
+**El disparador.** El job «Publish rolling release» de `sprig.yml` llevaba en
+rojo **ocho de ocho merges a main** (PR #17 a #24, desde el 2026-08-10). Ningún
+cambio nuestro lo rompió: viene así del fork.
+
+Al tirar del hilo aparecieron **tres** workflows en rojo permanente, no uno, y
+con una sola causa: publican a destinos que son de **Block**, y el fork no los
+posee.
+
+| Workflow | Qué intenta | Cómo falla |
+|---|---|---|
+| `sprig.yml` (job `publish`) | `gh release edit sprig-latest` | `release not found` |
+| `docker.yml` (relay + push gateway) | push a `ghcr.io/block/buzz` y `…/buzz-push-gateway` | `denied: permission_denied: The requested installation does not exist` |
+| `sprig-image.yml` | push a `ghcr.io/block/buzz-sprig` | ídem |
+
+`sprig.yml` y `docker.yml` no llevan filtro de rutas en su disparador de
+`push`, así que se caían en **todos** los merges; `sprig-image.yml`, en los que
+tocaran `crates/**`.
+
+**Y no era solo en main: los PRs también.** Esto se descubrió al abrir el PR de
+esta misma divergencia, contra la predicción de que los builds de pull request
+—que van con `push=false`— estaban a salvo. No lo estaban, y el motivo no se ve
+en el `push`: es el **`cache-to`**. `docker.yml` y `sprig-image.yml` habilitan
+la caché de registro cuando el PR sale de una rama del propio repo, y la
+escriben en `${IMAGE_NAME}-buildcache:<arch>` — el GHCR de Block otra vez. De
+ahí `error writing layer blob: denied: permission_denied`. Los runs de PR de
+`docker.yml` llevaban en rojo desde el 2026-08-08, cuatro checks por PR.
+
+La lección, que vale más allá de este caso: **`push: false` no significa «este
+build no escribe en el registro»**. La caché es una escritura más, y va por su
+propia condición.
+
+**Por qué no se arregla, sino que se apaga.** La salida evidente para el primero
+—hacer el paso idempotente (`gh release create … || gh release edit …`) o crear
+`sprig-latest` a mano— pone el job en verde **fabricando** lo que le falta: una
+release con binarios de Linux que aquí no consume nadie.
+
+Sprig es el multicall estático de Linux (`buzz-acp` + `buzz-agent` +
+`buzz-dev-mcp`) para agentes **en contenedor**. En este fork:
+
+- Ningún script ni doc descarga el tarball. Cero consumidores.
+- El backend de Kubernetes usa la **imagen**, no el tarball, y su
+  `DEFAULT_IMAGE` está clavada en compilación al digest publicado por Block
+  (`crates/buzz-backend-kubernetes/src/config.rs`).
+- Nuestros agentes corren **en local, en el Mac** (ver «El estado fuera del
+  repo»), contra el relay alojado de Block. No hay flota de Linux.
+
+Lo mismo vale para las dos imágenes: usamos el relay de Block, no uno propio.
+
+Y crear la release a mano tiene un defecto de más: es estado invisible fuera del
+repo —justo lo que la sección «El estado fuera del repo» existe para catalogar,
+porque un clon no lo reconstruye—. Un re-fork volvería a rojo sin rastro del
+porqué.
+
+**El mecanismo: variable de repositorio, no borrar el fichero.** Mismo idioma
+que la divergencia de `windows-rust` en `ci.yml`. Un `if:` de una línea es la
+superficie mínima frente a un merge de upstream; **borrar los workflows daría
+conflicto delete/modify cada vez que upstream los toque**, y un
+`gh workflow disable` es estado de API que no queda escrito en ninguna parte.
+
+| Variable | Apaga |
+|---|---|
+| `CI_SPRIG_RELEASE` | el job `publish` de `sprig.yml` |
+| `CI_RELAY_IMAGE` | los cuatro jobs de `docker.yml` (relay y push gateway) |
+| `CI_SPRIG_IMAGE` | los jobs de `sprig-image.yml` |
+
+**Qué se conserva encendido, a propósito:** el job `build` de `sprig.yml`. Es
+verde y compila los crates de agente contra **musl estático**, cobertura que
+`ci.yml` (glibc) no da. Ahí lo único que se apaga es la publicación.
+
+Los dos workflows de imagen, en cambio, se apagan **enteros, PRs incluidos**.
+El primer intento los gateó con
+`vars.X == 'true' || github.event_name == 'pull_request'` para no perder la
+validación de los `Dockerfile` antes de mergear; el propio PR demostró que esa
+cobertura no existía —ver arriba, el `cache-to`—, así que la excepción solo
+habría conservado seis checks en rojo por PR.
+
+**Qué se pierde mientras esté apagado**: la publicación, y la compilación de
+las dos imágenes. Nadie las construía en verde ni las consumía, así que no se
+pierde ninguna señal que estuviera funcionando. El día que se enciendan, la
+validación de los `Dockerfile` vuelve con ellas.
+
+**Cómo se reactiva.** Encender la variable sola no basta para las imágenes: hay
+que apuntarlas antes a un namespace propio, con las escotillas que upstream ya
+dejó puestas (`GHCR_IMAGE`, `GHCR_SPRIG_IMAGE`).
+
+```bash
+gh variable set GHCR_IMAGE  --repo Pimia-AI/pimia-workspace --body ghcr.io/pimia-ai/buzz
+gh variable set CI_RELAY_IMAGE --repo Pimia-AI/pimia-workspace --body true
+```
+
+Ese es exactamente el día que se ejerza la **válvula de escape** de la sección
+«La estrategia»: autoalojar el relay y dejar de seguir el calendario de Block.
+`CI_SPRIG_RELEASE` y `CI_SPRIG_IMAGE`, el día que haya agentes en Linux.
+
+**Qué vigilar en cada merge.** Los tres `if:` viven en ficheros de upstream y
+son la única divergencia en ellos: si un merge trae cambios en la cabecera de
+esos jobs, conservar el gate. Y si algún día upstream mete el
+`create || edit` idempotente en `sprig.yml` —es un fallo legítimo suyo, no
+nuestro—, tomarlo sin problema: el gate lo sigue apagando aquí.

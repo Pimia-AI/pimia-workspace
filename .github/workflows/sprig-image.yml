@@ -16,6 +16,9 @@ name: Sprig image
 #   - pull_request (paths-filtered) → build only, no push
 #   - workflow_dispatch             → manual publish at the current ref
 #
+# Divergencia Pimia: en este fork el workflow entero está apagado tras la
+# variable `CI_SPRIG_IMAGE`, PRs incluidos. Ver el comentario del job `build`.
+#
 # NOTE: the first push creates the GHCR package PRIVATE by default. An org
 # admin must flip ghcr.io/block/buzz-sprig to public once (Package settings →
 # Change visibility). Subsequent pushes keep the visibility.
@@ -54,6 +57,25 @@ jobs:
   build:
     name: Build (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
+    # Divergencia Pimia: la publicación de la imagen queda apagada en el fork.
+    # `IMAGE_NAME` apunta a `ghcr.io/block/buzz-sprig`, que es de Block, y el
+    # push fallaba con `denied: permission_denied: The requested installation
+    # does not exist` en cada merge a main que tocara `crates/**`.
+    #
+    # Los builds de pull request tampoco se salvaban, y el motivo no se ve en
+    # el `push=false` que lleva `build-push-action`: es el `cache-to`. Está
+    # habilitado cuando el PR sale de una rama del propio repo, y escribe la
+    # caché en `${IMAGE_NAME}-buildcache:<arch>` — o sea, también en el GHCR de
+    # Block. De ahí `error writing layer blob: denied: permission_denied`.
+    # Por eso el gate NO exceptúa `pull_request`: no hay cobertura verde que
+    # preservar. Ver el job `build` de docker.yml, que es el mismo caso.
+    #
+    # Se reactiva **sin tocar código**, pero para que sirva de algo hay que
+    # apuntar antes la imagen a un namespace propio:
+    #   gh variable set GHCR_SPRIG_IMAGE --repo Pimia-AI/pimia-workspace \
+    #     --body ghcr.io/pimia-ai/buzz-sprig
+    #   gh variable set CI_SPRIG_IMAGE --repo Pimia-AI/pimia-workspace --body true
+    if: vars.CI_SPRIG_IMAGE == 'true'
     timeout-minutes: 60
     permissions:
       contents: read
