@@ -14,6 +14,27 @@
  *   con el nominal, la fila lo dice y enseña debajo el neto. La cifra grande
  *   sigue siendo la nominal a propósito — es el importe legal del documento, y
  *   es por la que ordena el servidor.
+ * - **Las fechas pasan por `formatIsoDateShort`**, nunca por `new Date(...)`.
+ *   Hasta el 2026-08-18 esta tabla montaba la fecha con `new Date("2026-08-18")`,
+ *   que no es el 18 de agosto sino **medianoche UTC** del 18: al oeste de
+ *   Greenwich cae en el día anterior. En un lead eso es feo; en una factura la
+ *   fecha de emisión y la de vencimiento son datos fiscales —deciden trimestre,
+ *   plazo de cobro e intereses de demora—, y una tabla que las corre un día
+ *   miente sobre el documento sin que nada lo delate: la fecha desplazada tiene
+ *   el mismo aspecto que la buena. Peor todavía, la ficha tenía su propio
+ *   `formatDate` con el mismo fallo pero otro formato de mes, así que la misma
+ *   factura podía leerse «01 sep» en la tabla y «31 de agosto» en su ficha.
+ *   Ahora las dos entran por `ui/pimiaDates.ts`, que monta el día a mediodía
+ *   local — la hora que ningún huso ni cambio de horario saca de su fecha.
+ *
+ * ⚠️ `formatIsoDateShort` solo entiende `YYYY-MM-DD`; cualquier otra cosa la
+ * devuelve **en crudo**, incluida una marca de tiempo completa. Es a propósito y
+ * es un cambio de comportamiento respecto al `new Date()` de antes, que se
+ * tragaba un `2026-08-18T00:00:00Z` y lo pintaba bonito (a veces con el día
+ * corrido). Hoy `api/invoices.ts` pasa `invoice_date` y `due_date` tal cual
+ * llegan y el servidor manda fecha pelada; el día que mande otra forma, esta
+ * tabla la enseña fea en vez de adivinarla, que es como se descubre un contrato
+ * nuevo en lugar de tragárselo.
  */
 
 import { Copy, FileText, User } from "lucide-react";
@@ -24,6 +45,7 @@ import type {
 } from "@/features/pimia/api/invoices";
 import { formatCents } from "@/features/pimia/lib/money";
 import { PimiaAmountCell } from "@/features/pimia/ui/PimiaAmountCell";
+import { formatIsoDateShort } from "@/features/pimia/ui/pimiaDates";
 import {
   PimiaSortableHead,
   type PimiaSortState,
@@ -44,21 +66,6 @@ import {
   TableRow,
 } from "@/shared/ui/table";
 
-function formatDate(value: string | null) {
-  if (!value) {
-    return "—";
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-  return parsed.toLocaleDateString("es-ES", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-}
-
 export type PimiaInvoiceSort = PimiaSortState<PimiaInvoiceSortField>;
 
 type PimiaInvoiceListProps = {
@@ -69,7 +76,15 @@ type PimiaInvoiceListProps = {
   /** Oculta la columna de cliente cuando ya se está dentro de uno. */
   showCustomer?: boolean;
   sort?: PimiaInvoiceSort;
-  /** Suma de lo que hay en pantalla, al pie. */
+  /**
+   * Suma de lo que hay en pantalla, al pie.
+   *
+   * `null` **esconde el pie entero**, y es la única respuesta honesta cuando
+   * la suma no se pudo hacer: quien la calcula (`sumStrict`) devuelve `null` en
+   * cuanto una factura no trae importe legible. Ojo con «arreglar» esto
+   * pintando una raya en el total — se descartó a propósito, el porqué está en
+   * el comentario del `totalCents` de `PimiaInvoicesScreen`.
+   */
   totalCents?: number | null;
 };
 
@@ -195,10 +210,10 @@ export function PimiaInvoiceList({
                 </TableCell>
               ) : null}
               <TableCell className="whitespace-nowrap py-2.5 text-muted-foreground">
-                {formatDate(invoice.invoiceDate)}
+                {formatIsoDateShort(invoice.invoiceDate)}
               </TableCell>
               <TableCell className="whitespace-nowrap py-2.5 text-muted-foreground">
-                {formatDate(invoice.dueDate)}
+                {formatIsoDateShort(invoice.dueDate)}
               </TableCell>
               <TableCell className="py-2.5">
                 <PimiaInvoiceStatusBadge status={invoice.status} />

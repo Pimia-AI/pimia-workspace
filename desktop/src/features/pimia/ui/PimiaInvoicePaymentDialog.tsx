@@ -11,6 +11,19 @@
  * exactamente eso), y así debe ser. Lo de aquí sirve para avisar antes de gastar
  * un viaje — y por eso, cuando no puede saber el tope, **lo dice** en vez de
  * callarse: ver `lib/payments.ts`.
+ *
+ * 📅 **La fecha del cobro es hoy en el calendario de quien cobra, no en UTC.**
+ * Hasta el 2026-08-18 este diálogo prellenaba con
+ * `new Date().toISOString().slice(0, 10)` — literalmente la línea que
+ * `lib/calendar.ts` señala en su docblock como el error heredado del panel Vue:
+ * `toISOString()` habla UTC, así que en España, entre medianoche y las dos de la
+ * madrugada de verano, devuelve **ayer**. En un parte de trabajo eso descuadra
+ * una jornada; aquí es la fecha de un **cobro**, y el 1 de julio a la una de la
+ * mañana el campo se rellenaba con el 30 de junio: el dinero se apuntaba en el
+ * trimestre anterior, en un modelo ya presentado o a punto de estarlo. Y salía
+ * bien escrito, con su formato y todo, así que nadie lo miraba dos veces. Con
+ * `todayIso()` la fecha es el día local del reloj de quien mira, que es el único
+ * que significa algo cuando se cuenta caja.
  */
 
 import * as React from "react";
@@ -19,6 +32,7 @@ import { HandCoins } from "lucide-react";
 import type { PimiaInvoice } from "@/features/pimia/api/invoices";
 import { PimiaApiError } from "@/features/pimia/api/pimiaClient";
 import { useRecordPimiaInvoicePayment } from "@/features/pimia/hooks/usePimiaResources";
+import { todayIso } from "@/features/pimia/lib/calendar";
 import { formatCents, parseAmountToCents } from "@/features/pimia/lib/money";
 import { exceedsCeiling, paymentCeiling } from "@/features/pimia/lib/payments";
 import { Button } from "@/shared/ui/button";
@@ -33,10 +47,6 @@ import {
 import { Input } from "@/shared/ui/input";
 import { Spinner } from "@/shared/ui/spinner";
 
-function isoToday() {
-  return new Date().toISOString().slice(0, 10);
-}
-
 export function PimiaInvoicePaymentDialog({
   invoice,
   onOpenChange,
@@ -50,7 +60,24 @@ export function PimiaInvoicePaymentDialog({
 }) {
   const record = useRecordPimiaInvoicePayment();
   const [amount, setAmount] = React.useState("");
-  const [date, setDate] = React.useState(isoToday);
+  /* El reloj se lee DOS veces a propósito, y no se memoiza.
+   *
+   * `PimiaLeadsScreen` sí memoiza su «hoy» (`useMemo(() => todayIso(), [])`) y
+   * tiene razón para hacerlo: allí «hoy» es el criterio con el que se pintan de
+   * rojo cincuenta filas, y si cada tecla del buscador volviera a mirar el reloj
+   * una sesión abierta a medianoche podría comparar dos filas contra días
+   * distintos. Aquí «hoy» no compara nada: es el **valor por defecto de un campo
+   * editable**, y lo que se quiere es exactamente lo contrario — que sea de
+   * verdad el día en que se abre el diálogo. Congelarlo al montar dejaría que
+   * una ventana abierta desde ayer por la tarde prellenara la fecha de ayer en
+   * el cobro que se registra esta mañana, que es el mismo bug de trimestre que
+   * el docblock cuenta, sólo que por el otro lado.
+   *
+   * De ahí las dos lecturas: la del montaje (perezosa, para no llamar al reloj
+   * en cada render) y la del efecto de abrir, que es la que manda. Y por eso el
+   * efecto vuelve a poner la fecha aunque el usuario la hubiera cambiado: cada
+   * apertura es un cobro nuevo. */
+  const [date, setDate] = React.useState(todayIso);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -62,7 +89,7 @@ export function PimiaInvoicePaymentDialog({
         ? (invoice.dueCents / 100).toFixed(2).replace(".", ",")
         : "",
     );
-    setDate(isoToday());
+    setDate(todayIso());
     setErrorMessage(null);
   }, [invoice.dueCents, open]);
 

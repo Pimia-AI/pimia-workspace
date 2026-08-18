@@ -21,6 +21,7 @@ import {
   resolveDateRange,
   type PimiaDateRangePreset,
 } from "@/features/pimia/lib/dateRanges";
+import { sumStrict } from "@/features/pimia/lib/money";
 import { useAppNavigation } from "@/app/navigation/useAppNavigation";
 import { useActivePimiaTenant } from "@/features/pimia/hooks/usePimiaAuth";
 import { usePimiaInvoicesQuery } from "@/features/pimia/hooks/usePimiaResources";
@@ -167,13 +168,35 @@ export function PimiaInvoicesScreen() {
   const invoices = query.data?.invoices ?? [];
   const lastPage = query.data?.pagination?.lastPage ?? 1;
   const totalCount = query.data?.totalCount ?? null;
-  // Suma el importe NETO de rectificativas, que es el dinero que hay de
-  // verdad en la página: una factura anulada aporta cero, no su nominal. Sin
-  // los `effective_*` (servidor sin la vista ligera) se cae al nominal.
-  const totalCents = invoices.reduce(
-    (total, invoice) =>
-      total + (invoice.effectiveTotalCents ?? invoice.totalCents ?? 0),
-    0,
+  /* Suma el importe NETO de rectificativas, que es el dinero que hay de verdad
+   * en la página: una factura anulada aporta cero, no su nominal. Sin los
+   * `effective_*` (servidor sin la vista ligera) se cae al nominal, y eso NO es
+   * un hueco: es el mismo dato dicho por un servidor más viejo. Por eso el
+   * `??` sigue aquí dentro y lo que se le entrega a `sumStrict` es ya «el
+   * importe de esta factura», sea el neto o el nominal.
+   *
+   * Y a partir de ahí, en ESTRICTO. Hasta el 2026-08-18 esto era un `reduce`
+   * que remataba en `?? 0`: una factura cuyo `total` no se pudo leer —el caso
+   * real de este ERP no es exótico, `due_amount` ya llegó una vez como cadena
+   * decimal y `readCents` devuelve `null` en cuanto la forma cambia— entraba en
+   * la suma valiendo cero. El resultado no era «casi bueno»: era una cifra MÁS
+   * PEQUEÑA que la real con exactamente el mismo aspecto que la buena, en el
+   * pie de la misma tabla en la que esa fila ya está enseñando su raya. La
+   * tabla se contradecía a sí misma y ganaba la mentira, porque el pie es lo
+   * que la gente copia. En facturas, además, esa cifra se copia a un correo o a
+   * una hoja de cierre.
+   *
+   * `null` significa «no puedo sumar esto», y `PimiaInvoiceList` esconde el pie
+   * entero cuando lo recibe —el precedente es el «Total en pantalla» de leads—.
+   * Esconder gana a pintar una raya en el pie: la raya de una fila señala QUÉ
+   * factura falta y se lee en su columna; una raya en el sitio del total es un
+   * renglón que sigue afirmando que aquí va un total, y el ojo que baja
+   * buscando la cifra se lleva un cero de consolación. Quien no ve el pie
+   * pregunta por él; quien ve un total falso se lo cree. */
+  const totalCents = sumStrict(
+    invoices.map(
+      (invoice) => invoice.effectiveTotalCents ?? invoice.totalCents,
+    ),
   );
 
   const count = (value: number | null | undefined) =>

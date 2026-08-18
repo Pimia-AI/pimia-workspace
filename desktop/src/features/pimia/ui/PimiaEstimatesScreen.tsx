@@ -27,6 +27,7 @@ import {
   resolveDateRange,
   type PimiaDateRangePreset,
 } from "@/features/pimia/lib/dateRanges";
+import { sumStrict } from "@/features/pimia/lib/money";
 import { useActivePimiaTenant } from "@/features/pimia/hooks/usePimiaAuth";
 import { usePimiaEstimatesQuery } from "@/features/pimia/hooks/usePimiaResources";
 import {
@@ -167,19 +168,41 @@ export function PimiaEstimatesScreen() {
   const estimates = query.data?.estimates ?? [];
   const lastPage = query.data?.pagination?.lastPage ?? 1;
   const totalCount = query.data?.totalCount ?? null;
-  const totalCents = estimates.reduce(
-    (total, estimate) => total + (estimate.totalCents ?? 0),
-    0,
+  /* El «Total en pantalla» del pie, en ESTRICTO.
+   *
+   * ⚠️ Hasta el 2026-08-18 esto era un `reduce` con `?? 0`, y ese `?? 0` no
+   * daba un total «casi bueno»: daba uno **más pequeño que el real con
+   * exactamente el mismo aspecto que el bueno**. Un `total` que `readCents` no
+   * supo leer entraba en la suma valiendo cero y salía invisible — sin signo,
+   * sin color, sin una cifra rara que invitara a mirar dos veces. Y se pintaba
+   * en el pie de la misma tabla donde esa fila ya estaba enseñando su raya, así
+   * que la tabla se contradecía a sí misma y ganaba la mentira, porque el pie es
+   * lo que la gente copia.
+   *
+   * `sumStrict` devuelve `null` en cuanto un sumando no es un número finito, y
+   * con `null` la lista **esconde el pie entero** (el porqué de esconderlo en
+   * vez de rayarlo está en el docblock de `totalCents` en `PimiaEstimateList`).
+   *
+   * Sobre el `?? []` de arriba: `sumStrict` suma `0` para una lista vacía, que
+   * es el total honesto de una lista sin sumandos, pero `estimates` también está
+   * vacía **mientras la petición vuela**. Aquí no engaña porque toda la tarjeta
+   * de la tabla —pie incluido— cuelga de `estimates.length > 0`: ese `0` no
+   * llega nunca a pintarse. */
+  const totalCents = sumStrict(
+    estimates.map((estimate) => estimate.totalCents),
   );
 
   const count = (value: number | null | undefined) =>
     typeof value === "number" ? String(value) : "—";
-  const sent = sentQuery.data?.totalCount;
-  const viewed = viewedQuery.data?.totalCount;
-  const awaiting =
-    typeof sent === "number" && typeof viewed === "number"
-      ? sent + viewed
-      : null;
+  /* «Sin respuesta» son dos peticiones distintas, y por eso se suman con la
+   * misma regla que los importes: si una de las dos no ha vuelto (`undefined`)
+   * o el servidor no mandó su total (`null`), el resultado es `null` y `count()`
+   * pinta la raya. Contar la que falta como 0 daría una cifra menor que la real
+   * —«3 sin respuesta» cuando son 11— indistinguible de la buena. */
+  const awaiting = sumStrict([
+    sentQuery.data?.totalCount,
+    viewedQuery.data?.totalCount,
+  ]);
   const hasFilters = Boolean(search || status || range !== "any");
 
   return (

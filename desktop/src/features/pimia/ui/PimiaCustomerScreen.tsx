@@ -17,6 +17,7 @@ import {
   usePimiaCustomerQuery,
   usePimiaEstimatesQuery,
 } from "@/features/pimia/hooks/usePimiaResources";
+import { sumStrict } from "@/features/pimia/lib/money";
 import { PimiaAmount } from "@/features/pimia/ui/PimiaAmountCell";
 import { PimiaEstimateCreateDialog } from "@/features/pimia/ui/PimiaEstimateCreateDialog";
 import { PimiaEstimateList } from "@/features/pimia/ui/PimiaEstimateList";
@@ -91,6 +92,32 @@ export function PimiaCustomerScreen({ customerId }: { customerId: string }) {
 
   const customer = customerQuery.data;
   const estimates = estimatesQuery.data?.estimates ?? [];
+  /* El «Total en pantalla» del pie de la tabla, en ESTRICTO.
+   *
+   * ⚠️ Hasta el 2026-08-18 esto era un `reduce` con `?? 0` escrito en la propia
+   * prop, y fue el pie que se quedó fuera del barrido: `PimiaEstimatesScreen` y
+   * `PimiaInvoicesScreen` pasaron a `sumStrict` y este no, precisamente porque
+   * estaba escondido dentro del JSX en vez de tener nombre aquí arriba.
+   *
+   * Muerde en la ficha de un cliente con tres presupuestos, uno de ellos con el
+   * `total` en una forma que `readCents` no supo leer: la fila pinta su raya
+   * —`PimiaAmountCell` ya lo hace— y justo debajo, en la MISMA tabla, el pie
+   * afirmaba «Total en pantalla 3.000,00 €» cuando el real es mayor. La tabla se
+   * contradecía a sí misma a dos centímetros de distancia, y ganaba la mentira,
+   * porque el pie es la cifra que se copia a un correo. Y aquí más que en
+   * ningún sitio: esto es lo que se le dice a ESE cliente que tiene contratado.
+   *
+   * `sumStrict` devuelve `null` en cuanto un sumando no es un número finito, y
+   * con `null` la lista esconde el pie entero (el porqué de esconderlo en vez de
+   * rayarlo está en el docblock de `totalCents` en `PimiaEstimateList`).
+   *
+   * Sobre la lista vacía: `sumStrict` suma `0` cuando no hay sumandos, que es el
+   * total honesto de una lista sin filas, pero `estimates` también está vacía
+   * mientras la petición vuela. Aquí ese `0` no llega a pintarse nunca porque la
+   * tabla entera —pie incluido— cuelga de `estimates.length > 0`. */
+  const totalCents = sumStrict(
+    estimates.map((estimate) => estimate.totalCents),
+  );
 
   return (
     <div className="flex h-full flex-col gap-5 overflow-y-auto p-6">
@@ -181,10 +208,7 @@ export function PimiaCustomerScreen({ customerId }: { customerId: string }) {
                   estimates={estimates}
                   onOpen={(id) => void goPimiaEstimate(id)}
                   showCustomer={false}
-                  totalCents={estimates.reduce(
-                    (total, estimate) => total + (estimate.totalCents ?? 0),
-                    0,
-                  )}
+                  totalCents={totalCents}
                 />
               </div>
             ) : null}

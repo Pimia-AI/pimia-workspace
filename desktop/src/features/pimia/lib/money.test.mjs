@@ -7,7 +7,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { formatCents, parseAmountToCents, readCents } from "./money.ts";
+import {
+  formatCents,
+  parseAmountToCents,
+  readCents,
+  sumStrict,
+} from "./money.ts";
 
 /** `Intl` separa el símbolo con espacio duro; para comparar da igual cuál sea. */
 function plain(text) {
@@ -89,6 +94,80 @@ test("parseAmountToCents devuelve null en vez de inventarse un importe", () => {
   // Más de dos decimales no es un importe en euros: no se redondea a espaldas
   // del usuario.
   assert.equal(parseAmountToCents("1,234"), null);
+});
+
+test("sumStrict suma los importes que sí se pudieron leer", () => {
+  // El «Total en pantalla» del pie de facturas: la suma de la columna que se
+  // está viendo, en céntimos y sin pasar por float.
+  assert.equal(sumStrict([450050, 1234567, 1]), 1684618);
+  assert.equal(sumStrict([100000]), 100000);
+});
+
+test("sumStrict con negativos: una rectificativa resta de verdad", () => {
+  // Una factura anulada aporta su nominal en negativo, y el neto de la página
+  // puede acabar en cero o por debajo. Cero aquí es un total calculado, no un
+  // hueco: se distingue de `null` justamente por eso.
+  assert.equal(sumStrict([-2550, -1000]), -3550);
+  assert.equal(sumStrict([100000, -100000]), 0);
+  assert.equal(sumStrict([100000, -250000]), -150000);
+});
+
+/**
+ * El corazón del asunto. Si un solo importe no se pudo leer y se contase como
+ * 0, el pie enseñaría una cifra MENOR que la real con el mismo aspecto que la
+ * buena, en la misma tabla en la que esa fila ya está pintando su raya. Nadie
+ * denuncia un total que parece correcto: por eso la suma entera se rinde.
+ */
+test("sumStrict se rinde entera si un solo sumando es ilegible", () => {
+  assert.equal(sumStrict([450050, null, 1]), null);
+  // Da igual dónde esté el hueco: no hay posición «inofensiva».
+  assert.equal(sumStrict([null, 450050, 1]), null);
+  assert.equal(sumStrict([450050, 1, null]), null);
+  // Un único sumando, y encima ilegible: la suma no existe.
+  assert.equal(sumStrict([null]), null);
+});
+
+/**
+ * `undefined` es hueco igual que `null`, y no es teoría: los recuentos de
+ * cabecera salen de `query.data?.totalCount`, que vale `undefined` mientras la
+ * petición vuela y `null` cuando el servidor no manda el total. Las pantallas
+ * ya pintan una raya para los dos casos; la suma tiene que coincidir con lo que
+ * la tabla enseña.
+ */
+test("sumStrict trata undefined como el hueco que es", () => {
+  assert.equal(sumStrict([undefined]), null);
+  assert.equal(sumStrict([12, undefined, 30]), null);
+  assert.equal(sumStrict([12, null, undefined]), null);
+});
+
+/**
+ * Vacío devuelve 0 a propósito: cero es el total honesto de una lista sin
+ * sumandos —no falta ningún dato que esconder— y así el pie de una tabla
+ * filtrada a cero filas sigue cuadrando con las cero filas que se ven.
+ *
+ * ⚠️ Lo que NO significa es «aún no ha llegado nada»: `query.data?.x ?? []`
+ * también está vacía mientras carga, y ese 0 lo pone el `??` de la pantalla.
+ * Distinguirlo es de quien pinta, no de esta función.
+ */
+test("sumStrict de una lista vacía es cero, no una raya", () => {
+  assert.equal(sumStrict([]), 0);
+});
+
+test("sumStrict no deja pasar un NaN disfrazado de total", () => {
+  // El peor caso posible del fichero: `formatCents(NaN)` es «0,00 €», así que
+  // un total roto se pintaría como un cero perfecto. Se corta aquí.
+  assert.equal(plain(formatCents(Number.NaN)), "0,00 €");
+  assert.equal(sumStrict([100, Number.NaN]), null);
+  assert.equal(sumStrict([Number.POSITIVE_INFINITY]), null);
+});
+
+test("sumStrict encadenado con readCents: el caso real de due_amount", () => {
+  // Lo que de verdad se suma en una pantalla: importes recién leídos de la API.
+  // Mientras las formas sean las que el servidor manda, sale el total; en
+  // cuanto una no se puede leer —otra unidad, no un céntimo— se rinde en vez de
+  // inventarse la conversión.
+  assert.equal(sumStrict([readCents(1000), readCents("2000.00")]), 3000);
+  assert.equal(sumStrict([readCents(1000), readCents("1234.56")]), null);
 });
 
 test("el ciclo céntimos → texto → céntimos no pierde nada", () => {

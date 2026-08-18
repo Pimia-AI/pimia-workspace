@@ -9,6 +9,23 @@
  * Lo que sí hace: pedir el número justo antes de crear y reintentar si otro se
  * lo lleva (ver `api/estimates.ts`), y mandar siempre `discount`/`discount_type`
  * /`discount_val` porque sin ellos el servidor responde 500 en vez de 422.
+ *
+ * 📅 **Las fechas son el día local de quien presupuesta, y la de emisión era la
+ * peor de las seis que estaban en UTC.** Hasta el 2026-08-18 este fichero se
+ * resolvía las dos con un `isoDate()` de andar por casa que era, palabra por
+ * palabra, `new Date().toISOString().slice(0, 10)`: la línea que
+ * `lib/calendar.ts` señala en su docblock como el error heredado del panel Vue.
+ * `toISOString()` habla UTC, así que en España, entre medianoche y las dos de la
+ * madrugada de verano, devuelve **ayer**.
+ *
+ * Las otras cinco fechas que se arreglaron el mismo día sólo **pintaban** mal, y
+ * lo mal pintado se corrige recargando. Ésta se **escribe**: `estimateDate`
+ * viaja en el alta y se queda grabada en el presupuesto. Y encima **no hay campo
+ * que la enseñe** —el único `type="date"` del formulario es el de caducidad—,
+ * así que nadie la ve ni la puede corregir antes de mandarla. El 1 de julio a
+ * las 00:30 en Madrid (CEST, UTC+2) el presupuesto nacía fechado el 30 de junio:
+ * en un trimestre que puede estar ya presentado o bloqueado, con un error que
+ * sólo aparece cuando alguien cuadra el libro meses después.
  */
 
 import * as React from "react";
@@ -17,6 +34,7 @@ import { Plus, Trash2 } from "lucide-react";
 import type { PimiaEstimateDraftLine } from "@/features/pimia/api/estimates";
 import { PimiaApiError } from "@/features/pimia/api/pimiaClient";
 import { useCreatePimiaEstimate } from "@/features/pimia/hooks/usePimiaResources";
+import { addDays, todayIso } from "@/features/pimia/lib/calendar";
 import { formatCents, parseAmountToCents } from "@/features/pimia/lib/money";
 import { Button } from "@/shared/ui/button";
 import {
@@ -54,12 +72,6 @@ function lineAmount(line: DraftLine) {
   return formatCents(Math.round(priceCents * quantity));
 }
 
-function isoDate(offsetDays = 0) {
-  const date = new Date();
-  date.setDate(date.getDate() + offsetDays);
-  return date.toISOString().slice(0, 10);
-}
-
 type PimiaEstimateCreateDialogProps = {
   customerId: string;
   customerName: string;
@@ -74,7 +86,22 @@ export function PimiaEstimateCreateDialog({
   open,
 }: PimiaEstimateCreateDialogProps) {
   const [lines, setLines] = React.useState<DraftLine[]>([emptyLine(0)]);
-  const [expiryDate, setExpiryDate] = React.useState(() => isoDate(30));
+  /* El reloj se lee dos veces —aquí y en el envío— y NINGUNA de las dos cae en
+   * un render: ésta es un inicializador perezoso, que corre sólo al montar, y la
+   * otra ocurre dentro del `submit`. Por eso no hay nada que memoizar.
+   * `PimiaLeadsScreen` sí congela su «hoy» con `useMemo` porque allí es el
+   * criterio con el que se pintan de rojo cincuenta filas y las cincuenta tienen
+   * que compararse contra el mismo día; aquí «hoy» no compara nada.
+   *
+   * Y la del envío es a propósito la del momento de guardar, no un valor
+   * congelado al montar: este diálogo vive montado dentro de la ficha del
+   * cliente (se le pasa `open`, no se desmonta al cerrarlo), así que una pestaña
+   * abierta desde ayer por la tarde fecharía ayer el presupuesto que se crea
+   * esta mañana — el mismo salto de trimestre que el docblock cuenta, sólo que
+   * por el otro lado. */
+  const [expiryDate, setExpiryDate] = React.useState(() =>
+    addDays(todayIso(), 30),
+  );
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
   const create = useCreatePimiaEstimate();
 
@@ -107,7 +134,7 @@ export function PimiaEstimateCreateDialog({
     try {
       await create.mutateAsync({
         customerId,
-        estimateDate: isoDate(),
+        estimateDate: todayIso(),
         expiryDate,
         items: parsedLines,
       });
