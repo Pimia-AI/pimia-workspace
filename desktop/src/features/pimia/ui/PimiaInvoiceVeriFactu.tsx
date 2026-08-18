@@ -50,6 +50,9 @@ const AEAT_IN_FLIGHT: readonly string[] = ["queued", "sent"];
 /** Estados que significan «no existe registro», sin necesidad de sondear. */
 const AEAT_UNREGISTERED: readonly string[] = ["pending", "sandbox_only"];
 
+/** Nombra la región con su propio `<h2>`, igual que las tarjetas del raíl. */
+const TITLE_ID = "pimia-invoice-verifactu-title";
+
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof PimiaApiError ? error.message : fallback;
 }
@@ -137,30 +140,60 @@ export function PimiaInvoiceVeriFactu({ invoice }: { invoice: PimiaInvoice }) {
     invoice.aeatCsv || invoice.aeatHash || invoice.aeatQrUrl,
   );
 
+  /* El chasis es el del rediseño, calcado del `CollectionCard` que le queda a
+   * 24 px en el mismo raíl (la constante `CARD` de `PimiaInvoiceScreen.tsx`,
+   * que es de allí y no se exporta): `rounded-xl border border-border bg-card`
+   * con el relleno `p-4 sm:p-5`. Antes era `rounded-lg` y **sin `bg-card`**: un
+   * contorno hueco con otro radio y otro relleno a 24 px de una tarjeta sólida.
+   *
+   * Cuánto se notaba depende del tema, y conviene tenerlo escrito porque esta
+   * vista se porta al anfitrión web. En el tema adaptativo del escritorio
+   * `--card` y `--background` salen del **mismo** color (`adaptive-theme.ts`:
+   * los dos son `primaryBg`), así que allí el defecto era solo el radio y el
+   * relleno. En el anfitrión web no: su tema oscuro declara `--card` más claro
+   * que `--background`, y ahí el contorno hueco se leía como un agujero
+   * recortado justo al lado de la tarjeta de cobro.
+   *
+   * La cabecera dejó de ser una banda con raya: el título entra en el mismo
+   * bloque acolchado que el contenido, que es como lo cuenta la tarjeta de al
+   * lado, y así los dos rótulos del raíl empiezan a la misma altura y al mismo
+   * cuerpo.
+   *
+   * El fallo sí se sale del chasis, y a propósito: ese estado no vive en el
+   * raíl sino a lo ancho, bajo la cabecera de la ficha (`isAeatUrgent`), así que
+   * el tinte `bg-destructive/10` no tiene ninguna tarjeta al lado con la que
+   * desentonar — ahí es un aviso, no una tarjeta hueca.
+   *
+   * `shrink-0` sigue ganándose el sitio por esa misma colocación: arriba la
+   * sección es hija directa de la columna con `overflow-y-auto` de la ficha, y
+   * sin él el flex la aplastaría en vez de dejar que la página desplace. */
   return (
     <section
+      aria-labelledby={TITLE_ID}
       className={cn(
-        "shrink-0 rounded-lg border",
-        isFailure ? "border-destructive/30 bg-destructive/10" : "border-border",
+        "shrink-0 overflow-hidden rounded-xl border",
+        isFailure
+          ? "border-destructive/30 bg-destructive/10"
+          : "border-border bg-card",
       )}
       data-testid="pimia-invoice-verifactu"
     >
       {/* Sin repetir la insignia: el estado ya está en la cabecera de la ficha,
           junto al del documento y el del cobro. Aquí va lo que el estado no
           cabe en decir — el motivo, la prueba y el arreglo. */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-inherit px-4 py-3">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+      <div className="space-y-3 p-4 sm:p-5">
+        <h2
+          className="flex items-center gap-2 font-semibold text-foreground"
+          id={TITLE_ID}
+        >
           {isFailure ? (
             <TriangleAlert
               aria-hidden="true"
-              className="h-4 w-4 text-destructive"
+              className="h-4 w-4 shrink-0 text-destructive"
             />
           ) : null}
           VeriFactu
         </h2>
-      </div>
-
-      <div className="space-y-3 px-4 py-3">
         {isFailure ? (
           <>
             <p className="text-sm text-foreground">

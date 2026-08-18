@@ -133,7 +133,7 @@ test("la ficha de una factura borrador", async ({ page }) => {
   await page.getByTestId("pimia-invoice-open-91").click();
   // Sin número hasta publicar: el título lo dice en vez de fingirlo.
   await expect(page.getByRole("heading", { name: "Borrador" })).toBeVisible();
-  await expect(page.getByText("Se asigna al publicar")).toBeVisible();
+  await expect(page.getByText("Se numera al publicar.")).toBeVisible();
   await shoot(page, "factura-borrador");
 });
 
