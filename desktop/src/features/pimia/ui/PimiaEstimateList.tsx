@@ -12,6 +12,14 @@
  * referencia la usa en casi todas las celdas (descripción, email del cliente),
  * pero el índice de presupuestos de Pimia devuelve del cliente solo el nombre:
  * rellenar el hueco por simetría sería inventar densidad.
+ *
+ * ⚠️ **Las dos fechas pasan por `ui/pimiaDates`, no por `new Date()`.** Hasta el
+ * 2026-08-18 este fichero tenía su propio `formatDate` con un `new Date(value)`
+ * sobre el `YYYY-MM-DD` de la API, que es **medianoche UTC**: al oeste de
+ * Greenwich «válido hasta 2026-08-18» se escribía «17 ago 2026», y un
+ * presupuesto parecía caducar el día antes de caducar. No se reproduce jamás
+ * desde Madrid, así que no lo iba a cazar nadie mirando. `formatIsoDateShort`
+ * monta la fecha a mediodía local; el porqué completo está en su fichero.
  */
 
 import { Copy, FileText, User } from "lucide-react";
@@ -22,6 +30,7 @@ import type {
 } from "@/features/pimia/api/estimates";
 import { formatCents } from "@/features/pimia/lib/money";
 import { PimiaAmountCell } from "@/features/pimia/ui/PimiaAmountCell";
+import { formatIsoDateShort } from "@/features/pimia/ui/pimiaDates";
 import { PimiaEstimateActions } from "@/features/pimia/ui/PimiaEstimateActions";
 import {
   PimiaSortableHead,
@@ -39,21 +48,6 @@ import {
   TableRow,
 } from "@/shared/ui/table";
 
-function formatDate(value: string | null) {
-  if (!value) {
-    return "—";
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-  return parsed.toLocaleDateString("es-ES", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-}
-
 export type PimiaEstimateSort = PimiaSortState<PimiaEstimateSortField>;
 
 type PimiaEstimateListProps = {
@@ -67,7 +61,47 @@ type PimiaEstimateListProps = {
   showCustomer?: boolean;
   /** Sin esto las cabeceras no ordenan (el detalle de cliente no lo necesita). */
   sort?: PimiaEstimateSort;
-  /** Suma de lo que hay en pantalla, al pie y en la columna del importe. */
+  /**
+   * Suma de lo que hay en pantalla, al pie y en la columna del importe.
+   *
+   * Los tres valores dicen tres cosas distintas y por eso el tipo tiene tres
+   * estados:
+   *
+   * - **un número** → hay total y se pinta el pie;
+   * - **`undefined`** → quien llama no quiere pie;
+   * - **`null`** → hay pie que pintar pero la suma **no se pudo hacer**: algún
+   *   importe de la página llegó ilegible y `sumStrict` cortó la suma entera.
+   *
+   * Hoy son tres los llamantes, y conviene tenerlos contados porque la pregunta
+   * que se hace al auditar es «¿queda algún pie sumando con `?? 0`?»:
+   * `PimiaEstimatesScreen` (el listado general) y `PimiaCustomerScreen` (el
+   * detalle de cliente) **sí pasan `totalCents`, y los dos lo calculan con
+   * `sumStrict`**; solo `PimiaScreen` (el panel) omite la prop, porque enseña
+   * los últimos presupuestos y sumar un recorte no significaría nada.
+   *
+   * ⚠️ Esta lista se escribió mal una vez y el error costó un fallo: hasta el
+   * 2026-08-18 decía que el detalle de cliente era de los que no querían pie
+   * —cuando sí lo pintaba, y encima con un `reduce` y `?? 0`—, así que el mismo
+   * commit que dejó el hueco escribió la frase que hacía que nadie fuera a
+   * mirarlo. Quien añada o quite un llamante, que actualice esta enumeración en
+   * el mismo cambio: aquí una frase desactualizada no es una errata, es un
+   * fallo que se esconde solo.
+   *
+   * ⚠️ **Con `null` el pie se esconde ENTERO, y no se raya.** Es la decisión que
+   * el anfitrión web ya tomó en su `PimiaLeadsScreen`/`PimiaLeadList` y que aquí
+   * se copia con el mismo criterio. Las tres opciones se miraron: un total con
+   * el hueco contado como 0 es la peor, porque es una cifra menor que la real
+   * con el mismo aspecto que la buena; una raya en la celda del total es mejor,
+   * pero la fila del pie sigue diciendo «Total en pantalla» sobre una columna de
+   * dinero, y una raya ahí se lee a la primera como «cero» —es el sitio donde el
+   * ojo espera una suma, no un hueco—; esconder la fila es lo único que no
+   * admite lectura falsa. Un pie ausente dice «no puedo sumar esto» y quien
+   * buscaba el total pregunta por él; quien ve una cifra falsa se la cree.
+   *
+   * (La raya sí es lo correcto **dentro de una fila**, y ahí se pinta:
+   * `PimiaAmountCell` la enseña por el importe que falta. La diferencia es que
+   * la fila habla de un documento concreto, y el pie habla de todos a la vez.)
+   */
   totalCents?: number | null;
 };
 
@@ -164,10 +198,10 @@ export function PimiaEstimateList({
               </TableCell>
             ) : null}
             <TableCell className="whitespace-nowrap py-2.5 text-muted-foreground">
-              {formatDate(estimate.estimateDate)}
+              {formatIsoDateShort(estimate.estimateDate)}
             </TableCell>
             <TableCell className="whitespace-nowrap py-2.5 text-muted-foreground">
-              {formatDate(estimate.expiryDate)}
+              {formatIsoDateShort(estimate.expiryDate)}
             </TableCell>
             <TableCell className="py-2.5">
               <PimiaEstimateStatusBadge status={estimate.status} />
@@ -194,6 +228,10 @@ export function PimiaEstimateList({
           </TableRow>
         ))}
       </TableBody>
+      {/* `typeof === "number"` y no `!= null`: distingue los tres estados de la
+          prop de una vez —el `undefined` de quien no quiere pie y el `null` de
+          la suma que no se pudo hacer caen los dos aquí, y los dos significan
+          «esta tabla no lleva pie». */}
       {typeof totalCents === "number" ? (
         <TableFooter>
           <TableRow className="hover:bg-transparent">

@@ -11,6 +11,19 @@
  *
  * Como su molde, esta pantalla no recalcula nada: importes, vencimiento y
  * deuda llegan del servidor y se pintan tal cual.
+ *
+ * ⚠️ **Las fechas se escriben con `formatIsoDateLong` y nunca con `new Date()`.**
+ * Hasta el 2026-08-18 esta ficha tenía su propio `formatDate` con
+ * `new Date("2026-08-18")`, que no es el 18 de agosto: es **medianoche UTC** del
+ * 18, y al oeste de Greenwich cae en el día anterior. En una factura eso no es
+ * cosmético — la fecha de emisión decide el trimestre en el que declara y la de
+ * vencimiento decide desde cuándo se deben intereses de demora—, y una fecha
+ * corrida un día tiene exactamente el mismo aspecto que la buena. Encima el
+ * mismo fallo vivía duplicado en `PimiaInvoiceList` con otro formato de mes, así
+ * que una factura de fin de mes podía leerse «01 sep» en la tabla y «31 de
+ * agosto» aquí. Las dos entran ya por `ui/pimiaDates.ts`, que monta el día a
+ * mediodía local. Como allí, una cadena que no sea `YYYY-MM-DD` se enseña en
+ * crudo en vez de adivinarle un formato.
  */
 
 import * as React from "react";
@@ -23,7 +36,6 @@ import type {
   PimiaEstimateTax,
 } from "@/features/pimia/api/estimates";
 import { hasAeatState, isAeatUrgent } from "@/features/pimia/api/invoices";
-import { formatCents } from "@/features/pimia/lib/money";
 import { resolveDocumentTaxes, taxLabel } from "@/features/pimia/lib/taxes";
 import { useActivePimiaTenant } from "@/features/pimia/hooks/usePimiaAuth";
 import { usePimiaInvoiceQuery } from "@/features/pimia/hooks/usePimiaResources";
@@ -31,6 +43,7 @@ import {
   PimiaAmount,
   PimiaAmountCell,
 } from "@/features/pimia/ui/PimiaAmountCell";
+import { formatIsoDateLong } from "@/features/pimia/ui/pimiaDates";
 import { PimiaInvoiceActions } from "@/features/pimia/ui/PimiaInvoiceActions";
 import { PimiaInvoiceVeriFactu } from "@/features/pimia/ui/PimiaInvoiceVeriFactu";
 import { PimiaPageHeader } from "@/features/pimia/ui/PimiaPageHeader";
@@ -55,21 +68,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/shared/ui/table";
-
-function formatDate(value: string | null) {
-  if (!value) {
-    return "—";
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-  return parsed.toLocaleDateString("es-ES", {
-    day: "2-digit",
-    month: "long",
-    year: "numeric",
-  });
-}
 
 function formatQuantity(line: PimiaEstimateLine) {
   if (line.quantity === null) {
@@ -112,6 +110,21 @@ function FieldCard({
   );
 }
 
+/**
+ * Los impuestos de UNA línea, en la celda estrecha de la tabla.
+ *
+ * `PimiaEstimateTax.amountCents` es `number | null` —`normalizeTaxes` lo llena
+ * con `readCents(raw.amount)`, que se rinde en cuanto el importe no viene como
+ * entero de céntimos—, así que el hueco se deja pasar hasta `PimiaAmount` en vez
+ * de formatearlo como cero. Un IVA ilegible escrito «0,00 €» afirma que esta
+ * línea no lleva impuesto, y la etiqueta de al lado, que sigue diciendo «IVA
+ * 21%», demuestra que esa afirmación es falsa: la fila se contradice a sí misma
+ * y aun así se lee como una cifra buena.
+ *
+ * Que la colección entera venga a `null` o vacía se pinta con la misma raya: a
+ * este nivel de detalle la tabla no separa «no lleva impuestos» de «no vinieron
+ * con la ficha», y no merece un tercer símbolo.
+ */
 function TaxLines({ taxes }: { taxes: PimiaEstimateTax[] | null }) {
   if (!taxes || taxes.length === 0) {
     return <span className="text-muted-foreground">—</span>;
@@ -123,21 +136,51 @@ function TaxLines({ taxes }: { taxes: PimiaEstimateTax[] | null }) {
           <span className="whitespace-nowrap text-muted-foreground">
             {taxLabel(tax)}
           </span>
-          <span className="whitespace-nowrap text-right tabular-nums text-foreground">
-            {formatCents(tax.amountCents ?? 0)}
-          </span>
+          <PimiaAmount
+            cents={tax.amountCents}
+            className="whitespace-nowrap text-right text-foreground"
+          />
         </React.Fragment>
       ))}
     </span>
   );
 }
 
+/**
+ * Una fila del desglose: la etiqueta a la izquierda, el importe a la derecha.
+ *
+ * ⚠️ **`amountCents` admite `null` a propósito y ese `null` tiene que llegar
+ * entero hasta `PimiaAmount`.** Hasta el 2026-08-18 el tipo era `number`, y el
+ * «Total» en negrita de más abajo llamaba con `invoice.totalCents ?? 0`: el
+ * hueco moría en el llamante, antes de que la celda de dinero —que sí sabe
+ * distinguirlo— pudiera pintar la raya.
+ *
+ * Y el hueco no es teórico —pero ojo con contarlo mal, que es fácil—.
+ * `readCents` **sí** lee la cadena decimal que este ERP manda hoy (`"1000.00"`
+ * → 1000: un `decimal:2` de un entero siempre acaba en ceros). Lo que devuelve
+ * `null` es un decimal con céntimos de verdad (`"1234.56"`), porque eso ya
+ * sería otra unidad y adivinarla es justo el error que `lib/money.ts` existe
+ * para no cometer. O sea que el hueco aparece cuando el servidor **cambia la
+ * forma** de un importe sin avisar, y `due_amount` ya demostró que eso pasa: el
+ * mismo dinero viaja como entero en un recurso y como cadena en otro.
+ *
+ * El día que pase, la misma factura pintaba «—» en la fila de la lista, se le
+ * caía el pie «Total en pantalla»... y aquí, en el sitio donde más se mira,
+ * decía «Total 0,00 €» en negrita. «Debe cero» y «no se pudo leer lo que debe»
+ * son dos hechos distintos, y en una factura confundirlos es peor que en
+ * ninguna otra pantalla: quien lo lee da el documento por saldado.
+ *
+ * Por eso aquí no hay ni un `?? 0`. Quien no tiene importe manda `null`,
+ * `PimiaAmount` pinta la raya apagada, y el énfasis del total no se la enciende
+ * —esa es la decisión 2 de `PimiaAmountCell`—, así que un dato que falta no se
+ * lee nunca como un dato enfático.
+ */
 function TotalsRow({
   amountCents,
   emphasis,
   label,
 }: {
-  amountCents: number;
+  amountCents: number | null;
   emphasis?: boolean;
   label: string;
 }) {
@@ -266,8 +309,14 @@ export function PimiaInvoiceScreen({ invoiceId }: { invoiceId: string }) {
                   label: "Número",
                   value: invoice.invoiceNumber ?? "Se asigna al publicar",
                 },
-                { label: "Fecha", value: formatDate(invoice.invoiceDate) },
-                { label: "Vencimiento", value: formatDate(invoice.dueDate) },
+                {
+                  label: "Fecha",
+                  value: formatIsoDateLong(invoice.invoiceDate),
+                },
+                {
+                  label: "Vencimiento",
+                  value: formatIsoDateLong(invoice.dueDate),
+                },
                 {
                   label: "Referencia",
                   value: invoice.referenceNumber ?? "—",
@@ -365,8 +414,15 @@ export function PimiaInvoiceScreen({ invoiceId }: { invoiceId: string }) {
               ) : null}
               {documentTaxes.length > 0 ? (
                 documentTaxes.map((tax) => (
+                  // El hueco pasa tal cual, pero solo llega honesto por una de
+                  // las dos ramas de `resolveDocumentTaxes`: el desglose de
+                  // cabecera se devuelve intacto, mientras que el que se agrega
+                  // de las líneas (el caso `tax_per_item`) suma con `?? 0` en
+                  // `lib/taxes.ts`, así que ahí un IVA ilegible ya viene
+                  // convertido en cero desde río arriba y esta fila no puede
+                  // recuperarlo. Se arregla en ese fichero, no en este.
                   <TotalsRow
-                    amountCents={tax.amountCents ?? 0}
+                    amountCents={tax.amountCents}
                     key={tax.id}
                     label={taxLabel(tax)}
                   />
@@ -376,7 +432,7 @@ export function PimiaInvoiceScreen({ invoiceId }: { invoiceId: string }) {
               ) : null}
               <div className="border-t border-border pt-2">
                 <TotalsRow
-                  amountCents={invoice.totalCents ?? 0}
+                  amountCents={invoice.totalCents}
                   emphasis
                   label="Total"
                 />

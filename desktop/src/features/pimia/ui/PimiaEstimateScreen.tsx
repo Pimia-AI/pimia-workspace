@@ -10,6 +10,17 @@
  * pintan tal como los devuelve el servidor —incluida la suma— porque las
  * invariantes fiscales son suyas y una segunda aritmética aquí solo serviría
  * para discrepar de la factura de verdad.
+ *
+ * ⚠️ **Las fechas pasan por `ui/pimiaDates`, no por `new Date()`.** Hasta el
+ * 2026-08-18 esta ficha tenía su propio `formatDate` con un `new Date(value)`
+ * sobre el `YYYY-MM-DD` de la API, que es **medianoche UTC**: al oeste de
+ * Greenwich el «Vencimiento» se escribía un día antes del real. Y la ficha era
+ * el peor sitio para que pasara, porque la tabla tenía su propio `formatDate`
+ * con la misma avería pero **otro formato**, así que el mismo presupuesto podía
+ * enseñar dos días distintos según por dónde se mirase y ninguno de los dos
+ * delataba al otro. Ahora las dos pantallas comparten el mismo montaje a
+ * mediodía local y solo cambia el largo del mes: `formatIsoDateLong` aquí, donde
+ * sobra sitio, y `formatIsoDateShort` en la tabla, que compite por el ancho.
  */
 
 import * as React from "react";
@@ -21,7 +32,6 @@ import type {
   PimiaEstimateLine,
   PimiaEstimateTax,
 } from "@/features/pimia/api/estimates";
-import { formatCents } from "@/features/pimia/lib/money";
 import { resolveDocumentTaxes, taxLabel } from "@/features/pimia/lib/taxes";
 import { useActivePimiaTenant } from "@/features/pimia/hooks/usePimiaAuth";
 import { usePimiaEstimateQuery } from "@/features/pimia/hooks/usePimiaResources";
@@ -29,6 +39,7 @@ import {
   PimiaAmount,
   PimiaAmountCell,
 } from "@/features/pimia/ui/PimiaAmountCell";
+import { formatIsoDateLong } from "@/features/pimia/ui/pimiaDates";
 import { PimiaEstimateActions } from "@/features/pimia/ui/PimiaEstimateActions";
 import { PimiaPageHeader } from "@/features/pimia/ui/PimiaPageHeader";
 import { PimiaEstimateStatusBadge } from "@/features/pimia/ui/PimiaStatusBadge";
@@ -48,21 +59,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/shared/ui/table";
-
-function formatDate(value: string | null) {
-  if (!value) {
-    return "—";
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-  return parsed.toLocaleDateString("es-ES", {
-    day: "2-digit",
-    month: "long",
-    year: "numeric",
-  });
-}
 
 /** `2` → `2`; `2,5` → `2,5`. Sin decimales de adorno. */
 function formatQuantity(line: PimiaEstimateLine) {
@@ -115,6 +111,14 @@ function FieldCard({
  * derecha, en columna. Puestos en una sola cadena («IVA 21% 525,00 €») el ojo
  * no encuentra dónde empieza el dinero, que es justo lo que hay que poder
  * comparar entre líneas.
+ *
+ * ⚠️ El importe sale por `PimiaAmount`, no por `formatCents`. El `amountCents`
+ * de un impuesto de línea es `number | null` —`readCents` devuelve `null`
+ * cuando el `amount` del impuesto llega en una forma que no sabe leer— y el
+ * `?? 0` que había aquí hasta el 2026-08-18 lo pintaba «0,00 €» en la columna
+ * de Impuestos. Un IVA que de verdad vale cero y un IVA que no se pudo leer se
+ * veían carácter por carácter igual, y el de cero es el que invita a pensar en
+ * una exención y a no volver a mirar.
  */
 function TaxLines({ taxes }: { taxes: PimiaEstimateTax[] | null }) {
   if (!taxes || taxes.length === 0) {
@@ -127,22 +131,42 @@ function TaxLines({ taxes }: { taxes: PimiaEstimateTax[] | null }) {
           <span className="whitespace-nowrap text-muted-foreground">
             {taxLabel(tax)}
           </span>
-          <span className="whitespace-nowrap text-right tabular-nums text-foreground">
-            {formatCents(tax.amountCents ?? 0)}
-          </span>
+          <PimiaAmount
+            cents={tax.amountCents}
+            className="whitespace-nowrap text-right text-foreground"
+          />
         </React.Fragment>
       ))}
     </span>
   );
 }
 
-/** El desglose. Cada línea solo aparece si el servidor la manda con valor. */
+/**
+ * Una línea del desglose. Cada una solo aparece si el concepto viene en el
+ * documento —quien llama decide eso—, pero el importe **entra como
+ * `number | null`** y baja tal cual a `PimiaAmount`, que ya sabe que un hueco
+ * se pinta con una raya y no con un cero.
+ *
+ * ⚠️ Hasta el 2026-08-18 el tipo era `number` a secas, y por eso los llamantes
+ * se lo daban con un `?? 0` — incluido el «Total» en negrita de la ficha. Esa
+ * anotación era la que mataba el hueco: un presupuesto cuyo `total` llega en
+ * una forma que `readCents` no sabe leer se pintaba «—» en la fila de la lista,
+ * desaparecía del pie «Total en pantalla»… y al abrir la ficha el usuario leía
+ * **«Total 0,00 €»** en cuerpo grande. La cifra más mirada de las tres era la
+ * única que seguía mintiendo, y como mentía con el aspecto exacto de un dato
+ * bueno, nadie tenía motivo para ir a contrastarla con las otras dos.
+ *
+ * El `emphasis` manda en el tamaño y en el peso, nunca en el color del hueco:
+ * `PimiaAmount` pone su `text-muted-foreground` **después** del `className`, así
+ * que un total ilegible sale grande pero apagado. Se ve que falta; no se lee
+ * como un dato enfático.
+ */
 function TotalsRow({
   amountCents,
   emphasis,
   label,
 }: {
-  amountCents: number;
+  amountCents: number | null;
   emphasis?: boolean;
   label: string;
 }) {
@@ -254,10 +278,13 @@ export function PimiaEstimateScreen({ estimateId }: { estimateId: string }) {
             <FieldCard
               rows={[
                 { label: "Número", value: estimate.estimateNumber },
-                { label: "Fecha", value: formatDate(estimate.estimateDate) },
+                {
+                  label: "Fecha",
+                  value: formatIsoDateLong(estimate.estimateDate),
+                },
                 {
                   label: "Vencimiento",
-                  value: formatDate(estimate.expiryDate),
+                  value: formatIsoDateLong(estimate.expiryDate),
                 },
                 {
                   label: "Referencia",
@@ -356,11 +383,21 @@ export function PimiaEstimateScreen({ estimateId }: { estimateId: string }) {
               ) : null}
               {/* Uno por uno: el IVA y la retención de IRPF sumados dan un
                   neto que esconde las dos. Si el documento los lleva por
-                  línea, se agregan de ahí — igual que hace el panel. */}
+                  línea, se agregan de ahí — igual que hace el panel.
+
+                  El importe baja sin `?? 0`, pero eso **no** cierra el hueco
+                  del todo, y conviene no creérselo: `resolveDocumentTaxes`
+                  (`lib/taxes.ts`) solo conserva el `null` cuando el impuesto
+                  aparece en una única línea; en cuanto aparece en dos o más, su
+                  acumulador suma con `?? 0` y un importe ilegible se convierte
+                  en un cero **dentro** del total de ese impuesto, donde ya no
+                  hay forma de verlo. Ese arreglo es de `lib/taxes.ts` y está
+                  pendiente aparte; lo que se garantiza aquí es que la ficha ya
+                  no pone un cero propio encima del que venga. */}
               {documentTaxes.length > 0 ? (
                 documentTaxes.map((tax) => (
                   <TotalsRow
-                    amountCents={tax.amountCents ?? 0}
+                    amountCents={tax.amountCents}
                     key={tax.id}
                     label={taxLabel(tax)}
                   />
@@ -370,7 +407,7 @@ export function PimiaEstimateScreen({ estimateId }: { estimateId: string }) {
               ) : null}
               <div className="border-t border-border pt-2">
                 <TotalsRow
-                  amountCents={estimate.totalCents ?? 0}
+                  amountCents={estimate.totalCents}
                   emphasis
                   label="Total"
                 />

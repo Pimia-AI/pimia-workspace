@@ -114,3 +114,68 @@ export function parseAmountToCents(input: string): number | null {
 
   return negative ? -cents : cents;
 }
+
+/**
+ * Suma en ESTRICTO: un solo sumando ilegible y la suma entera vale `null`.
+ *
+ * Es el brazo de agregación de la promesa que abre este fichero —la aritmética
+ * de dinero vive aquí y en ningún otro sitio—, y existe por la regla que
+ * gobierna todas las cifras de este ERP: un dato que no se pudo leer es una
+ * raya, nunca un 0.
+ *
+ * Contar el hueco como 0 no da un total «casi bueno». Da uno **más pequeño que
+ * el real con exactamente el mismo aspecto que el bueno**, sin nada en pantalla
+ * que lo delate: ni un signo, ni un color, ni una cifra rara que invite a mirar
+ * dos veces. Es la clase de error que nadie denuncia porque nadie lo ve. Y
+ * encima se pinta en el pie de la misma tabla en la que esa fila ya está
+ * enseñando su raya, así que la tabla se contradice a sí misma y gana la
+ * mentira, porque el pie es lo que la gente copia.
+ *
+ * Devolver `null` deja que quien llama esconda el pie entero, que es lo honesto:
+ * quien no ve la cifra va a preguntar por ella; quien ve una cifra falsa se la
+ * cree.
+ *
+ * Acepta `undefined` además de `null` **porque los sitios de uso lo traen**, no
+ * por si acaso: los importes mapeados son `number | null` (salen de
+ * `readCents`), pero los recuentos de cabecera salen de `query.data?.totalCount`
+ * y son `undefined` mientras la petición vuela y `null` cuando el servidor no
+ * manda el total. Para lo que aquí importa las dos cosas son el mismo hecho: no
+ * hay dato. El `count()` de las pantallas ya pinta una raya para ambas; si esta
+ * suma solo admitiera `null`, cada llamada tendría que poner un `?? null` de su
+ * cosecha, y el día que alguien escriba `?? 0` en su lugar vuelve exacto el bug
+ * que esto existe para impedir.
+ *
+ * El sitio que estrenó esa firma es el «Sin respuesta» de `PimiaEstimatesScreen`
+ * (los totales de `SENT` y `VIEWED` son dos peticiones distintas): ya suma por
+ * aquí, y con una de las dos en vuelo pinta la raya en vez de la mitad del
+ * recuento. 🕳️ **Queda uno pendiente**: `PimiaScreen` ~85-90 hace la misma suma
+ * a mano con un `typeof sent === "number" && typeof viewed === "number"`. No es
+ * una decisión, es trabajo sin hacer: la suma manual acierta hoy —también da
+ * `null` si falta un lado— pero repite la regla en vez de citarla, y basta que
+ * alguien la «simplifique» con un `?? 0` para que el panel de inicio enseñe «3
+ * sin respuesta» donde hay 11, con el mismo aspecto que la cifra buena.
+ *
+ * ⚠️ **La lista vacía suma `0`, no `null`**: cero es el total honesto de una
+ * lista sin sumandos, porque no hay ningún hueco que esconder. Pero ojo con de
+ * dónde sale la lista: `query.data?.invoices ?? []` está vacía **mientras
+ * carga**, y entonces ese `0` lo puso el `??` de la pantalla, no esta función.
+ * Aquí no se puede distinguir «no hay filas» de «aún no han llegado»; quien
+ * pinta el pie mira antes si la consulta sigue en vuelo.
+ *
+ * ⚠️ Un `NaN` cuenta como hueco. No debería llegar ninguno —`readCents` no lo
+ * devuelve jamás—, pero si llegara sería el peor caso del fichero: `formatCents`
+ * formatea `NaN` como `0,00 €`, así que un total roto se pintaría como un cero
+ * perfecto. Cerrarle la puerta cuesta media condición.
+ */
+export function sumStrict(
+  values: (number | null | undefined)[],
+): number | null {
+  let total = 0;
+  for (const value of values) {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      return null;
+    }
+    total += value;
+  }
+  return total;
+}
