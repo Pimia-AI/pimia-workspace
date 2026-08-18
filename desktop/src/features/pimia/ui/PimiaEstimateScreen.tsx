@@ -385,15 +385,13 @@ export function PimiaEstimateScreen({ estimateId }: { estimateId: string }) {
                   neto que esconde las dos. Si el documento los lleva por
                   línea, se agregan de ahí — igual que hace el panel.
 
-                  El importe baja sin `?? 0`, pero eso **no** cierra el hueco
-                  del todo, y conviene no creérselo: `resolveDocumentTaxes`
-                  (`lib/taxes.ts`) solo conserva el `null` cuando el impuesto
-                  aparece en una única línea; en cuanto aparece en dos o más, su
-                  acumulador suma con `?? 0` y un importe ilegible se convierte
-                  en un cero **dentro** del total de ese impuesto, donde ya no
-                  hay forma de verlo. Ese arreglo es de `lib/taxes.ts` y está
-                  pendiente aparte; lo que se garantiza aquí es que la ficha ya
-                  no pone un cero propio encima del que venga. */}
+                  El importe baja sin `?? 0`, y desde el 2026-08-18 el hueco
+                  está cerrado **también río arriba**: `resolveDocumentTaxes`
+                  (`lib/taxes.ts`) agrega con `sumStrict`, así que un importe
+                  ilegible deja el total de ESE impuesto en `null` en vez de
+                  disolverse en un cero. Antes solo se conservaba cuando el
+                  impuesto aparecía en una única línea, o sea que el mismo
+                  documento mentía o no según cuántas líneas tuviera. */}
               {documentTaxes.length > 0 ? (
                 documentTaxes.map((tax) => (
                   <TotalsRow

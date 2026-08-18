@@ -414,13 +414,12 @@ export function PimiaInvoiceScreen({ invoiceId }: { invoiceId: string }) {
               ) : null}
               {documentTaxes.length > 0 ? (
                 documentTaxes.map((tax) => (
-                  // El hueco pasa tal cual, pero solo llega honesto por una de
-                  // las dos ramas de `resolveDocumentTaxes`: el desglose de
-                  // cabecera se devuelve intacto, mientras que el que se agrega
-                  // de las líneas (el caso `tax_per_item`) suma con `?? 0` en
-                  // `lib/taxes.ts`, así que ahí un IVA ilegible ya viene
-                  // convertido en cero desde río arriba y esta fila no puede
-                  // recuperarlo. Se arregla en ese fichero, no en este.
+                  // El hueco pasa tal cual, y desde el 2026-08-18 llega honesto
+                  // por las DOS ramas de `resolveDocumentTaxes`: la de cabecera
+                  // se devuelve intacta, y la que agrega de las líneas (el caso
+                  // `tax_per_item`) suma con `sumStrict`, así que un IVA
+                  // ilegible llega como `null` y esta fila pinta su raya en vez
+                  // de un cero que nadie podría discutir.
                   <TotalsRow
                     amountCents={tax.amountCents}
                     key={tax.id}
