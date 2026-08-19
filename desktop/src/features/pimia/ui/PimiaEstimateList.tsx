@@ -8,10 +8,42 @@
  * derecha en cifras de ancho fijo con la base debajo, y un menú de acciones
  * por fila.
  *
+ * **El destinatario de un presupuesto no siempre es un cliente**, y ésa es la
+ * diferencia de fondo con la tabla de facturas: se le manda igual a un lead del
+ * CRM, que todavía no está dado de alta. Cuando el presupuesto va a uno, el
+ * servidor manda `customer_id: null` y `lead_id` relleno, así que la columna
+ * lleva la insignia LEAD junto al nombre — y el menú de la fila deja de ofrecer
+ * «Ver el cliente», que es lo correcto: no hay ficha a la que ir.
+ * ⚠️ El nombre del lead sale de la proyección `lead`, que es **opcional**: si
+ * no viene (este índice pide `view=summary`, y está sin comprobar que la
+ * lleve), queda la insignia sola sobre una raya. Eso dice exactamente lo que se
+ * sabe —«va a una oportunidad, no a un cliente»— sin inventarse a quién.
+ *
+ * ⚠️ **Ni el criterio ni la insignia se escriben aquí**: los dos se importan de
+ * `PimiaEstimateDocument` —`estimateGoesToLead` y `PimiaLeadChip`—, que es donde
+ * viven razonados. Hasta el 2026-08-19 esta tabla tenía los suyos propios y los
+ * dos habían derivado: la condición era `leadId` a secas, así que un presupuesto
+ * con los DOS ids salía marcado aquí junto al nombre del cliente que sí tiene y
+ * sin marcar en su propia ficha, a un clic de distancia; y el rótulo iba escrito
+ * «Lead» en el DOM y puesto en mayúsculas por CSS, que reabre justo la colisión
+ * de `getByText` que la insignia de la ficha evita escribiéndolo ya en
+ * mayúsculas. Una segunda copia de una regla de negocio en una tabla es una
+ * regla que nadie va a acordarse de cambiar dos veces.
+ *
  * La segunda línea solo aparece donde hay un dato de verdad que poner. La
  * referencia la usa en casi todas las celdas (descripción, email del cliente),
  * pero el índice de presupuestos de Pimia devuelve del cliente solo el nombre:
  * rellenar el hueco por simetría sería inventar densidad.
+ *
+ * **La columna «Válido hasta» avisa de lo que está por caducar**, que era la
+ * mitad que faltaba: la insignia dice «Caducado» cuando el servidor ya lo ha
+ * estampado, pero nada decía «caduca en 3 días», y en una lista donde el que
+ * caduca mañana se ve igual que el de noviembre no hay a quién llamar primero.
+ * La regla vive en `lib/estimates.ts` con sus pruebas —incluida la diferencia
+ * con las facturas: aquí el rojo lo enciende el calendario, porque `EXPIRED` es
+ * un estado y el barrido que lo estampa va por detrás—; aquí solo se pinta.
+ * ⚠️ `today` **baja como prop**, no se calcula por fila: cien filas serían cien
+ * relojes, y podrían cruzar la medianoche a mitad de tabla.
  *
  * ⚠️ **Las dos fechas pasan por `ui/pimiaDates`, no por `new Date()`.** Hasta el
  * 2026-08-18 este fichero tenía su propio `formatDate` con un `new Date(value)`
@@ -28,10 +60,16 @@ import type {
   PimiaEstimate,
   PimiaEstimateSortField,
 } from "@/features/pimia/api/estimates";
+import { estimateExpiryWarning } from "@/features/pimia/lib/estimates";
 import { formatCents } from "@/features/pimia/lib/money";
+import { cn } from "@/shared/lib/cn";
 import { PimiaAmountCell } from "@/features/pimia/ui/PimiaAmountCell";
 import { formatIsoDateShort } from "@/features/pimia/ui/pimiaDates";
 import { PimiaEstimateActions } from "@/features/pimia/ui/PimiaEstimateActions";
+import {
+  estimateGoesToLead,
+  PimiaLeadChip,
+} from "@/features/pimia/ui/PimiaEstimateDocument";
 import {
   PimiaSortableHead,
   type PimiaSortState,
@@ -61,6 +99,29 @@ type PimiaEstimateListProps = {
   showCustomer?: boolean;
   /** Sin esto las cabeceras no ordenan (el detalle de cliente no lo necesita). */
   sort?: PimiaEstimateSort;
+  /**
+   * El día LOCAL de quien mira, en `YYYY-MM-DD` (`todayIso()` de
+   * `lib/calendar.ts`). Es lo único contra lo que se mide el preaviso de
+   * caducidad de la columna «Válido hasta».
+   *
+   * **Opcional a propósito, y no por comodidad**: hoy son tres los llamantes
+   * (ver `totalCents`) y sólo el índice general lo pasa. Sin él la columna se
+   * comporta como antes —la fecha y nada más—, que es una tabla más pobre pero
+   * no una tabla que mienta. Un valor por defecto leído aquí dentro sería lo
+   * contrario: un `todayIso()` por fila, cien relojes en una tabla de cien
+   * filas, y un «hoy» que se congela al montar en una pantalla que se queda
+   * abierta de un día para otro (el índice lo refresca cada minuto, ver
+   * `PimiaEstimatesScreen`).
+   *
+   * Hoy lo pasan dos de los tres: `PimiaEstimatesScreen` (el índice general) y
+   * `PimiaCustomerScreen` (el detalle de cliente, donde un presupuesto a punto
+   * de caducar es justamente lo que se busca al abrir la ficha). 🔓 Falta
+   * `PimiaScreen`, el panel, y lo querrá en cuanto alguien lo toque: pasarlo es
+   * una línea y no cambia nada más. Quien lo pase, que arregle esta frase en el
+   * mismo cambio — ver el aviso de `totalCents`, que cuenta lo que costó
+   * dejarla obsoleta una vez.
+   */
+  today?: string;
   /**
    * Suma de lo que hay en pantalla, al pie y en la columna del importe.
    *
@@ -112,6 +173,7 @@ export function PimiaEstimateList({
   onSortChange,
   showCustomer = true,
   sort,
+  today,
   totalCents,
 }: PimiaEstimateListProps) {
   const isSortable = Boolean(sort && onSortChange);
@@ -150,7 +212,10 @@ export function PimiaEstimateList({
         <TableRow className="hover:bg-transparent">
           {head("estimate_number", "Número", { className: "w-48 pl-3" })}
           {showCustomer ? (
-            <TableHead className="w-full">Cliente</TableHead>
+            // «Destinatario» y no «Cliente»: la columna enseña las dos cosas
+            // que un presupuesto puede tener enfrente, y rotularla «Cliente»
+            // dejaría la marca LEAD contradiciendo a su propia cabecera.
+            <TableHead className="w-full">Destinatario</TableHead>
           ) : null}
           {head("estimate_date", "Fecha", {
             className: "w-32 whitespace-nowrap",
@@ -169,64 +234,125 @@ export function PimiaEstimateList({
         </TableRow>
       </TableHeader>
       <TableBody>
-        {estimates.map((estimate) => (
-          <TableRow
-            data-testid={`pimia-estimate-${estimate.id}`}
-            key={estimate.id}
-          >
-            <TableCell className="whitespace-nowrap py-2.5 pl-3">
-              {onOpen ? (
-                // El número es el enlace a la ficha: un botón de verdad, para
-                // que el teclado llegue igual que el ratón.
-                <button
-                  className="rounded-sm font-mono font-medium text-foreground outline-hidden hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-                  data-testid={`pimia-estimate-open-${estimate.id}`}
-                  onClick={() => onOpen(estimate.id)}
-                  type="button"
-                >
-                  {estimate.estimateNumber}
-                </button>
-              ) : (
-                <span className="font-mono font-medium text-foreground">
-                  {estimate.estimateNumber}
-                </span>
-              )}
-            </TableCell>
-            {showCustomer ? (
-              <TableCell className="max-w-0 truncate py-2.5 font-medium text-foreground">
-                {estimate.customerName ?? "—"}
+        {estimates.map((estimate) => {
+          /* A quién va, decidido por el MISMO criterio que pinta la insignia y
+             que el papel de la ficha: `estimateGoesToLead` mira los dos ids. El
+             nombre y la insignia tienen que hablar del mismo destinatario, o la
+             celda pone el nombre de uno con la marca del otro.
+
+             Dentro del CRM el orden es de lo concreto a lo general: la persona,
+             si no la organización, si no el título de la oportunidad. Ninguno
+             se inventa —los tres pueden faltar, y la proyección `lead` es
+             opcional—, y entonces la celda se queda con la raya y la insignia.
+             ⛔ Y no hay respaldo cruzado: a un presupuesto de cliente sin nombre
+             de cliente NO se le pone el del lead que arrastre, que sería nombrar
+             a quien no lo recibe. */
+          const isLead = estimateGoesToLead(estimate);
+          const recipient = isLead
+            ? (estimate.lead?.personName ??
+              estimate.lead?.organizationName ??
+              estimate.lead?.title ??
+              null)
+            : estimate.customerName;
+          /* Sin `today` no hay preaviso: quien no lo pasa se queda con la fecha
+             a secas, y ninguna fila inventa su propio reloj. */
+          const warning = today
+            ? estimateExpiryWarning({
+                expiryDate: estimate.expiryDate,
+                status: estimate.status,
+                today,
+              })
+            : null;
+
+          return (
+            <TableRow
+              data-testid={`pimia-estimate-${estimate.id}`}
+              key={estimate.id}
+            >
+              <TableCell className="whitespace-nowrap py-2.5 pl-3">
+                {onOpen ? (
+                  // El número es el enlace a la ficha: un botón de verdad, para
+                  // que el teclado llegue igual que el ratón.
+                  <button
+                    className="rounded-sm font-mono font-medium text-foreground outline-hidden hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                    data-testid={`pimia-estimate-open-${estimate.id}`}
+                    onClick={() => onOpen(estimate.id)}
+                    type="button"
+                  >
+                    {estimate.estimateNumber}
+                  </button>
+                ) : (
+                  <span className="font-mono font-medium text-foreground">
+                    {estimate.estimateNumber}
+                  </span>
+                )}
               </TableCell>
-            ) : null}
-            <TableCell className="whitespace-nowrap py-2.5 text-muted-foreground">
-              {formatIsoDateShort(estimate.estimateDate)}
-            </TableCell>
-            <TableCell className="whitespace-nowrap py-2.5 text-muted-foreground">
-              {formatIsoDateShort(estimate.expiryDate)}
-            </TableCell>
-            <TableCell className="py-2.5">
-              <PimiaEstimateStatusBadge status={estimate.status} />
-            </TableCell>
-            <PimiaAmountCell
-              cents={estimate.totalCents}
-              className="py-2.5"
-              hint={
-                // Solo cuando aporta: si no hay impuestos, base y total son la
-                // misma cifra escrita dos veces.
-                estimate.subTotalCents !== null &&
-                estimate.subTotalCents !== estimate.totalCents
-                  ? `Base ${formatCents(estimate.subTotalCents)}`
-                  : undefined
-              }
-            />
-            <TableCell className="py-2.5 pr-2 text-right">
-              <PimiaEstimateRowActions
-                estimate={estimate}
-                onOpen={onOpen}
-                onOpenCustomer={onOpenCustomer}
+              {showCustomer ? (
+                <TableCell className="max-w-0 py-2.5 font-medium text-foreground">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate">{recipient ?? "—"}</span>
+                    {/* El `<span>` es solo el asidero del test: `PimiaLeadChip`
+                        no toma props hoy y la fila necesita poder señalarse una
+                        a una. Va con `contents` para que no cuente como caja:
+                        así el hijo de la fila flex sigue siendo la insignia con
+                        su propio `shrink-0`, y el envoltorio no mueve ni un
+                        píxel. 🔓 En cuanto la insignia acepte `data-testid`,
+                        sobra. */}
+                    {isLead ? (
+                      <span
+                        className="contents"
+                        data-testid={`pimia-estimate-lead-${estimate.id}`}
+                      >
+                        <PimiaLeadChip />
+                      </span>
+                    ) : null}
+                  </span>
+                </TableCell>
+              ) : null}
+              <TableCell className="whitespace-nowrap py-2.5 text-muted-foreground">
+                {formatIsoDateShort(estimate.estimateDate)}
+              </TableCell>
+              <TableCell className="whitespace-nowrap py-2.5 text-muted-foreground">
+                {formatIsoDateShort(estimate.expiryDate)}
+                {warning ? (
+                  <span
+                    className={cn(
+                      "block text-xs",
+                      warning.tone === "danger"
+                        ? "text-destructive"
+                        : "text-warning",
+                    )}
+                    data-testid={`pimia-estimate-expiry-warning-${estimate.id}`}
+                  >
+                    {warning.text}
+                  </span>
+                ) : null}
+              </TableCell>
+              <TableCell className="py-2.5">
+                <PimiaEstimateStatusBadge status={estimate.status} />
+              </TableCell>
+              <PimiaAmountCell
+                cents={estimate.totalCents}
+                className="py-2.5"
+                hint={
+                  // Solo cuando aporta: si no hay impuestos, base y total son la
+                  // misma cifra escrita dos veces.
+                  estimate.subTotalCents !== null &&
+                  estimate.subTotalCents !== estimate.totalCents
+                    ? `Base ${formatCents(estimate.subTotalCents)}`
+                    : undefined
+                }
               />
-            </TableCell>
-          </TableRow>
-        ))}
+              <TableCell className="py-2.5 pr-2 text-right">
+                <PimiaEstimateRowActions
+                  estimate={estimate}
+                  onOpen={onOpen}
+                  onOpenCustomer={onOpenCustomer}
+                />
+              </TableCell>
+            </TableRow>
+          );
+        })}
       </TableBody>
       {/* `typeof === "number"` y no `!= null`: distingue los tres estados de la
           prop de una vez —el `undefined` de quien no quiere pie y el `null` de

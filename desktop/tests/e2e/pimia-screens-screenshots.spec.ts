@@ -61,12 +61,29 @@ test("la lista de clientes", async ({ page }) => {
   await shoot(page, "clientes");
 });
 
+/**
+ * La ficha de cliente ahora monta sus documentos en dos pestañas y arranca en
+ * «Facturas»; Radix desmonta la que no está activa, así que al abrirla la tabla
+ * de presupuestos no está en el DOM todavía. La prueba comprueba lo mismo que
+ * antes —que la ficha enseña la lista de presupuestos de este cliente— pero en
+ * dos tiempos, y de paso retrata las dos caras: la escondida detrás de la
+ * pestaña no saldría en ninguna captura, que es justo la mitad de pantalla que
+ * el pase de diseño necesita comparar.
+ */
 test("el detalle de un cliente", async ({ page }) => {
   await boot(page);
   await page.getByTestId("pimia-nav-customers").click();
   await page.getByTestId("pimia-customer-1").click();
-  await expect(page.getByTestId("pimia-estimate-list")).toBeVisible();
+  // La pestaña con la que abre la ficha.
+  await expect(page.getByTestId("pimia-invoice-list")).toBeVisible();
   await shoot(page, "cliente-detalle");
+
+  // Y la de al lado, la que esta prueba miraba antes del rediseño. El rótulo
+  // lleva pegado el recuento («Presupuestos 3»), así que el nombre accesible no
+  // es exacto y hay que anclarlo al principio en vez de pedirlo entero.
+  await page.getByRole("tab", { name: /^Presupuestos/ }).click();
+  await expect(page.getByTestId("pimia-estimate-list")).toBeVisible();
+  await shoot(page, "cliente-detalle-presupuestos");
 });
 
 test("la lista de presupuestos", async ({ page }) => {

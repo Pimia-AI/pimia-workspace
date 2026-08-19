@@ -9,10 +9,26 @@
  * 2. **Bug conocido del servidor**: si una línea no lleva `discount`,
  *    `discount_type` y `discount_val`, responde **500 en vez de 422**. Se
  *    mandan siempre, aunque no haya descuento.
+ * 3. **Un presupuesto puede NO ir a un cliente.** Es la diferencia de fondo con
+ *    una factura: se le manda a quien todavía no lo es, y entonces
+ *    `customer_id` llega **`null` de JSON** y `lead_id` relleno. Hasta hoy este
+ *    normalizador hacía `String(raw.customer_id)` ante cualquier cosa que no
+ *    fuera `undefined`, así que ese `null` salía de aquí como la **cadena
+ *    `"null"`**, que es *truthy*: la ficha ofrecía «Ver el cliente» y navegaba a
+ *    `/customers/null`. Ver el comentario de `normalizeEstimate`.
  *
  * Y la regla de fondo: **los importes son céntimos enteros**.
+ *
+ * ⚠️ **`getEstimate` no manda `view=summary`**, así que la ficha recibe el
+ * `CustomerResource` **entero** y la proyección `lead`. Lo que este normalizador
+ * no lea, se tira: hasta hoy se tiraban el NIF del cliente, su dirección de
+ * facturación, el lead al que va dirigido y quién lo preparó.
  */
 
+import {
+  normalizeAddress,
+  type PimiaAddress,
+} from "@/features/pimia/api/addresses";
 import {
   PimiaApiError,
   pimiaRequest,
@@ -50,6 +66,25 @@ export type PimiaEstimateTax = {
   /** Porcentaje; negativo en las retenciones. `null` si es de importe fijo. */
   percent: number | null;
   amountCents: number | null;
+  /**
+   * La base sobre la que se calculó esta cuota (`TaxResource.base_amount`,
+   * `api.d.ts:4656`), en céntimos. Es el «(sobre 1.234,00 €)» que hace falta
+   * cuando en el mismo documento conviven varios tipos y la base imponible del
+   * pie ya no explica ninguna de las cuotas por sí sola.
+   *
+   * ⚠️ **Solo es de fiar en los impuestos de CABECERA.** `resolveDocumentTaxes`
+   * (`lib/taxes.ts`) tiene dos ramas: si el documento trae `taxes` de cabecera
+   * los devuelve intactos —y entonces esta base es la del documento—, pero si
+   * los lleva por línea agrega con `sumStrict` y **construye el modelo con un
+   * spread del primero que ve** (`{ ...tax, id }`), así que arrastraría la base
+   * de UNA línea con la cuota de TODAS. Por eso quien pinta el desglose
+   * comprueba antes de qué rama viene (`estimate.taxes` no vacío) y en la otra
+   * no escribe la base: una cifra que parece la base del tipo y es la de un
+   * renglón es exactamente la clase de dato plausible y falso que aquí no se
+   * pinta. 🔓 El día que `resolveDocumentTaxes` sepa sumar también las bases
+   * —es la misma llamada a `sumStrict`—, esa comprobación sobra.
+   */
+  baseAmountCents: number | null;
 };
 
 /** Una línea del presupuesto. Los importes, en céntimos enteros. */
@@ -65,6 +100,38 @@ export type PimiaEstimateLine = {
   totalCents: number | null;
   /** Los impuestos de la línea, cuando el documento los lleva por línea. */
   taxes: PimiaEstimateTax[] | null;
+};
+
+/**
+ * El **otro** destinatario posible de un presupuesto: una oportunidad del CRM.
+ *
+ * ⚠️ Esto es lo que separa un presupuesto de una factura: una factura se le
+ * emite siempre a un cliente dado de alta, pero un presupuesto se le manda a
+ * quien todavía no lo es. Cuando va a un lead, `customer_id` llega **`null`** y
+ * `lead_id` relleno; cuando va a un cliente, al revés.
+ *
+ * Son los cinco campos que publica la proyección `lead` de `EstimateResource`
+ * (`api.d.ts:3387-3393`) **y ni uno más**. Ojo, que no es un `$ref` a
+ * `LeadResource`: es un objeto declarado a mano que el servidor monta al
+ * serializar el presupuesto, y por eso **no trae `stage` ni `source`** aunque
+ * los dos existan en el recurso completo del lead (3971-3972). La maqueta pinta
+ * «Etapa» y «Origen» en su bloque del CRM; aquí no se pintan, porque sacarlos
+ * exigiría un `GET /leads/{id}` con scope `crm:read` que el grant del escritorio
+ * **no pide** (`src-tauri/src/pimia/oauth.rs:33-41`). Dos campos más en esa
+ * proyección y el bloque sería portable entero: es el reporte a plataforma con
+ * mejor relación coste/valor de este trabajo.
+ *
+ * Es una relación **opcional** (`lead?`) y el contrato no promete que
+ * `estimates.show` la cargue: si no viene queda `leadId` a secas, y entonces se
+ * dice que va a una oportunidad sin poder decir a cuál.
+ */
+export type PimiaEstimateLead = {
+  id: string;
+  /** El título de la oportunidad («Reforma integral en Vera»). */
+  title: string | null;
+  organizationName: string | null;
+  personName: string | null;
+  email: string | null;
 };
 
 export type PimiaEstimate = {
@@ -84,6 +151,59 @@ export type PimiaEstimate = {
    */
   customerEmail: string | null;
   customerPhone: string | null;
+  /**
+   * El NIF/CIF del cliente (`customer.tax_id`, `api.d.ts:3217`).
+   *
+   * ⚠️ **Ya llegaba en la respuesta y se tiraba en este mismo normalizador**,
+   * exactamente igual que pasaba en facturas hasta el 2026-08-18.
+   * `getEstimate` no manda `view=summary`, así que la ficha recibe el
+   * `CustomerResource` **entero** —y `tax_id` es un atributo sin `?`: si viene
+   * el cliente, viene él— y aquí nos quedábamos con nombre, correo y teléfono.
+   *
+   * En el índice sí es `null` de verdad: `view=summary` recorta el cliente a
+   * `{id, name, email, phone}`.
+   *
+   * ⛔ No existe ningún campo `nif` ni `cif` en el contrato. Se llama `tax_id`,
+   * igual que el de la empresa (2990), y punto.
+   */
+  customerTaxId: string | null;
+  /**
+   * La dirección de facturación del cliente (`customer.billing`,
+   * `api.d.ts:3230`), para el bloque «Presupuesto para».
+   *
+   * ⚠️ Es una **relación opcional** de Eloquent: viene si el servidor la cargó
+   * al serializar la ficha, y **el contrato no promete que lo haga** (ni
+   * siquiera en `GET /customers/{customer}`, donde `billing` sigue llevando
+   * `?`). Se lee de forma oportunista: si viene, se pinta; si no, el bloque de
+   * dirección **no se pinta y no deja hueco**.
+   *
+   * 👉 Y **no se sale a buscarla** a `/customers/{id}`: sería un N+1 por un
+   * renglón cosmético cuando el destinatario ya tiene nombre, NIF y correo.
+   *
+   * ⛔ `AddressResource` **no tiene `email`**: el correo del cliente es
+   * `customer.email` (3197), que ya se lee arriba.
+   */
+  customerBilling: PimiaAddress | null;
+  /**
+   * El id de la oportunidad del CRM a la que va dirigido, si no va a un
+   * cliente (`lead_id`, `api.d.ts:3366`).
+   *
+   * Llega relleno **o `null` de JSON**, nunca los dos a la vez con
+   * `customer_id`. Es lo único que se puede afirmar del destinatario cuando la
+   * relación `lead` no viene cargada.
+   */
+  leadId: string | null;
+  /** La proyección del lead, si el servidor la cargó. Ver `PimiaEstimateLead`. */
+  lead: PimiaEstimateLead | null;
+  /**
+   * Quién preparó el presupuesto (`creator.name`, `api.d.ts:3394` →
+   * `UserResource.name`, 4799).
+   *
+   * Relación **opcional**: sin ella queda `creator_id`, que es un número y no
+   * un nombre, así que no se lee. Y sin el nombre la línea «Preparado por» se
+   * omite entera — «Preparado por: —» no dice nada de nadie.
+   */
+  creatorName: string | null;
   notes: string | null;
   /** Los impuestos de la cabecera, desglosados. */
   taxes: PimiaEstimateTax[] | null;
@@ -174,8 +294,33 @@ export function normalizeTaxes(value: unknown): PimiaEstimateTax[] | null {
       name: text(raw.name) ?? "Impuesto",
       percent: readPercent(raw.percent),
       amountCents: readCents(raw.amount),
+      // `readCents` y no `Number()`, como todo el dinero de este módulo: un
+      // `Number(null)` valdría 0 y escribiría «sobre 0,00 €» junto a una cuota
+      // de 210 €, que es una base falsa con aspecto de base buena.
+      baseAmountCents: readCents(raw.base_amount),
     };
   });
+}
+
+/**
+ * La proyección `lead` de un presupuesto (`api.d.ts:3387-3393`), o `null`.
+ *
+ * `null` cuando la relación no vino. Cada campo se pasa por `text()`, así que
+ * una cadena vacía —que es como este ERP manda «no hay»— sale ya como `null` y
+ * quien pinta no tiene que volver a comprobarlo.
+ */
+export function normalizeLead(raw: unknown): PimiaEstimateLead | null {
+  if (typeof raw !== "object" || raw === null) {
+    return null;
+  }
+  const lead = raw as Record<string, unknown>;
+  return {
+    id: String(lead.id ?? ""),
+    title: text(lead.title),
+    organizationName: text(lead.organization_name),
+    personName: text(lead.person_name),
+    email: text(lead.email),
+  };
 }
 
 export function normalizeLine(raw: Record<string, unknown>): PimiaEstimateLine {
@@ -195,6 +340,7 @@ export function normalizeLine(raw: Record<string, unknown>): PimiaEstimateLine {
 
 function normalizeEstimate(raw: RawEstimate): PimiaEstimate {
   const customer = raw.customer as Record<string, unknown> | undefined;
+  const creator = raw.creator as Record<string, unknown> | undefined;
   const items = raw.items;
   return {
     id: String(raw.id ?? ""),
@@ -203,10 +349,28 @@ function normalizeEstimate(raw: RawEstimate): PimiaEstimate {
     status: text(raw.status) ?? "DRAFT",
     estimateDate: text(raw.estimate_date),
     expiryDate: text(raw.expiry_date),
-    customerId: raw.customer_id === undefined ? null : String(raw.customer_id),
+    /* ⚠️ `== null` con DOBLE igual, y es un arreglo, no un estilo. Hasta hoy
+     * esto era `=== undefined`, y un presupuesto emitido a un LEAD trae
+     * `customer_id: null` —el `null` de JSON, que **no** es `undefined`—, así
+     * que `String(null)` daba la cadena `"null"`, que es *truthy*. Consecuencia
+     * real y visible: el menú de la ficha ofrecía «Ver el cliente» y navegaba a
+     * `/customers/null`, un 404 con toda la pinta de un fallo del servidor. Es
+     * la otra mitad de leer el lead: sin este arreglo, la ficha diría a la vez
+     * «va a una oportunidad» y «aquí tienes su cliente». 🕳️ El gemelo exacto
+     * sigue vivo en `api/invoices.ts:581` y se reporta: allí no muerde igual
+     * —una factura siempre tiene cliente— pero es la misma línea. */
+    customerId: raw.customer_id == null ? null : String(raw.customer_id),
     customerName: customer ? text(customer.name) : null,
     customerEmail: customer ? text(customer.email) : null,
     customerPhone: customer ? text(customer.phone) : null,
+    // Los dos que la respuesta ya traía y este normalizador tiraba.
+    customerTaxId: customer ? text(customer.tax_id) : null,
+    customerBilling: customer ? normalizeAddress(customer.billing) : null,
+    // Mismo `== null` que arriba y por lo mismo: en un presupuesto de cliente
+    // este campo llega `null` de JSON.
+    leadId: raw.lead_id == null ? null : String(raw.lead_id),
+    lead: normalizeLead(raw.lead),
+    creatorName: creator ? text(creator.name) : null,
     notes: text(raw.notes),
     taxes: normalizeTaxes(raw.taxes),
     lines: Array.isArray(items)

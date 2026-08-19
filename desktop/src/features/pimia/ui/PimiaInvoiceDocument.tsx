@@ -2,6 +2,25 @@
  * El papel: la tarjeta-documento de la ficha de una factura — membrete,
  * «Facturar a», identificación, la tabla de conceptos y el pie de totales.
  *
+ * ## De dónde sale la forma: el chasis NO está aquí
+ *
+ * 👤 **La tarjeta-papel la inventó el rediseño de esta factura (2026-08-18), y
+ * el 2026-08-19 se MUDÓ a `PimiaDocumentParts.tsx`.** Banda, membrete, chip de
+ * sección, las medidas de la tabla y la fila del pie los comparte con el papel
+ * del presupuesto: los dos salen de la misma empresa y el cliente los recibe con
+ * una semana de diferencia, así que **no pueden ser dos códigos**. Se mudaron,
+ * no se copiaron: hubo unas horas con dos copias y ya divergían —la del
+ * presupuesto imprimía un renglón de país y un «(sobre 1.000,00 €)» que esta no
+ * imprimía—, que es exactamente el defecto que la mudanza cierra.
+ *
+ * Lo que queda en este fichero es lo que **solo dice una factura**: «Facturar
+ * a», la identificación con su vencimiento y su serie, el pie con la forma de
+ * pago y el CSV de la AEAT.
+ *
+ * ⛔ **Y no al revés: el presupuesto no importa de aquí.** Atar el papel de un
+ * documento comercial al de uno fiscal por una decisión de borde es justo lo que
+ * el tercer fichero existe para evitar.
+ *
  * ## Por qué vive aparte de `PimiaInvoiceScreen.tsx`
  *
  * 👤 **Se partió el 2026-08-18, el mismo día del rediseño**: la ficha entera
@@ -13,21 +32,23 @@
  * bloque de VeriFactu—, y su forma la manda lo que hoy se puede hacer con ella.
  * Un renglón fiscal nuevo se toca aquí sin releer el raíl, y al revés.
  *
- * ⚠️ **Es una vista más**: cuando esto se porte al anfitrión web hay que
- * añadirla a la lista `VERBATIM` de `scripts/portar-vistas.mjs`, igual que
- * `lib/invoices.ts`. Un fichero que no está en la lista no viaja y tampoco lo
- * delata `pnpm portar --check`, que compara **la lista** contra
- * `.portado-de.json`: el porte copiaría una pantalla que importa algo que no
- * existe allí.
+ * ⚠️ **Es una vista más, y ahora arrastra otra**: cuando esto se porte al
+ * anfitrión web hay que añadir a la lista `VERBATIM` de
+ * `scripts/portar-vistas.mjs` este fichero, `lib/invoices.ts` y también
+ * `PimiaDocumentParts.tsx`, de donde sale desde hoy el chasis del papel. Un
+ * fichero que no está en la lista no viaja y tampoco lo delata
+ * `pnpm portar --check`, que compara **la lista** contra `.portado-de.json`: el
+ * porte copiaría una pantalla que importa algo que no existe allí.
  *
  * ## Lo que NO se puede perder al releerlo
  *
  * Consisten todos en **no** pintar algo, y por eso un rediseño se los lleva por
  * delante sin enterarse: **ni un `?? 0` en un importe** (el dinero pasa por
  * `PimiaAmount`, que distingue «vale cero» de «no se pudo leer» — el caso que lo
- * motivó, en el docblock de `DocumentTotalRow`); **el desglose de impuestos sale
- * de `resolveDocumentTaxes`**, que agrega en estricto para no escribir una suma
- * menor que la real en la casilla que se copia al 303; **las fechas van por
+ * motivó, en el docblock de `DocumentTotalRow`, en `PimiaDocumentParts.tsx`);
+ * **el desglose de impuestos sale de `resolveDocumentTaxes`**, que agrega en
+ * estricto para no escribir una suma menor que la real en la casilla que se
+ * copia al 303; **las fechas van por
  * `pimiaDates`, jamás por `new Date(cadena)`**, que es medianoche UTC y al oeste
  * de Greenwich cae el día anterior; y **un borrador no tiene número y se dice**,
  * en vez de fingir uno.
@@ -43,26 +64,27 @@
  *   tocan, cada uno con su razón.
  */
 
-import type * as React from "react";
-import { useQuery } from "@tanstack/react-query";
 import { QrCode } from "lucide-react";
 
-import {
-  fetchCompanyProfile,
-  type PimiaCompanyAddress,
-} from "@/features/pimia/api/company";
-import type {
-  PimiaEstimateLine,
-  PimiaEstimateTax,
-} from "@/features/pimia/api/estimates";
-import type {
-  PimiaInvoice,
-  PimiaInvoiceAddress,
-} from "@/features/pimia/api/invoices";
+import type { PimiaInvoice } from "@/features/pimia/api/invoices";
 import { resolveDocumentTaxes, taxLabel } from "@/features/pimia/lib/taxes";
-import { useActivePimiaTenant } from "@/features/pimia/hooks/usePimiaAuth";
 import { PimiaAmount } from "@/features/pimia/ui/PimiaAmountCell";
-import { formatIsoDateShort } from "@/features/pimia/ui/pimiaDates";
+import {
+  CompanyLetterhead,
+  DOCUMENT_CARD,
+  DOCUMENT_PLACEMENT,
+  DocumentDate,
+  DocumentField,
+  DocumentSectionTitle,
+  DocumentTotalRow,
+  NUM_CELL,
+  NUM_HEAD,
+  ONLY_SM,
+  QTY_CELL,
+  TaxLines,
+  addressLines,
+  formatQuantity,
+} from "@/features/pimia/ui/PimiaDocumentParts";
 import { cn } from "@/shared/lib/cn";
 
 /* Los `id` que atan cada sección con su `<h2>`. Constantes de módulo y no
@@ -71,290 +93,16 @@ const DOCUMENT_TITLE_ID = "pimia-invoice-document-title";
 const BILL_TO_TITLE_ID = "pimia-invoice-bill-to-title";
 
 /**
- * El papel ocupa dos columnas y las dos filas; el raíl se apila en la tercera.
- * La colocación es **explícita** y no heredada del orden del DOM, así que el
- * orden al derrumbarse a una columna se elige aparte: **el cobro primero**. La
- * usa también el esqueleto de la pantalla, y por eso se exporta.
+ * 🕳️ **Reexportadas para `PimiaInvoiceScreen.tsx`, y solo por eso.** Las dos
+ * viven ya en `PimiaDocumentParts.tsx`; la pantalla de la factura sigue
+ * pidiéndoselas a este fichero, y cambiar sus imports es tocar su carril. En
+ * cuanto lo haga —la del presupuesto ya las pide en su sitio— esta línea sobra y
+ * se borra. No se redefine nada: es la misma constante y la misma función.
  */
-export const DOCUMENT_PLACEMENT =
-  "lg:col-span-2 lg:col-start-1 lg:row-span-2 lg:row-start-1";
-
-/* El chasis se deletrea aquí en vez de importar la constante `CARD` de la
- * pantalla: son las mismas cuatro clases que ya escriben a mano el
- * `CollectionCard` y `PimiaInvoiceVeriFactu`, y hacerlas viajar entre ficheros
- * ataría el documento a la pantalla por una decisión de borde. */
-const DOCUMENT_CARD =
-  "min-w-0 overflow-hidden rounded-xl border border-border bg-card px-4 py-5 sm:px-6 sm:pb-8 xl:px-8 xl:pb-10 xl:pt-8";
-
-/* El canal entre columnas numéricas, y las dos que se van bajo `sm`. El canal
- * solo abre a 32 px en `xl`; hasta ahí mide 24, que por los tres que hay son
- * los 24 px que le faltaban a la tabla para caber a 1024 px. */
-const GUTTER = "pl-6 xl:pl-8";
-const ONLY_SM = "hidden sm:table-cell";
-const NUM_HEAD = `whitespace-nowrap py-3 ${GUTTER} pr-0 text-right font-semibold`;
-const NUM_CELL = `py-4 ${GUTTER} pr-0 text-right align-top`;
-const QTY_CELL = `${NUM_CELL} ${ONLY_SM} whitespace-nowrap tabular-nums text-muted-foreground`;
-
-/**
- * Junta los trozos de una dirección saltándose los que no hay: sin esto, una
- * empresa con calle y sin ciudad imprime «Calle Mayor 12, » con el separador
- * colgando. `null` cuando no queda nada, para omitir el renglón entero.
- *
- * Vive aquí porque el papel la usa dos veces —membrete y «Facturar a»—, y se
- * exporta porque el raíl la usa una: la segunda línea de un cobro («método ·
- * referencia») cuelga el mismo separador cuando el método no vino.
- */
-export function joinParts(
-  parts: (string | null | undefined)[],
-  separator: string,
-): string | null {
-  const kept = parts.filter((part): part is string => Boolean(part));
-  return kept.length > 0 ? kept.join(separator) : null;
-}
-
-/** Las líneas legibles de una dirección postal, ya podadas. */
-function addressLines(
-  address: PimiaCompanyAddress | PimiaInvoiceAddress | null,
-): string[] {
-  if (!address) {
-    return [];
-  }
-  const locality = joinParts([address.zip, address.city], " ");
-  return [
-    joinParts([address.street1, address.street2], ", "),
-    joinParts([locality, address.state], ", "),
-  ].filter((line): line is string => line !== null);
-}
-
-function formatQuantity(line: PimiaEstimateLine) {
-  if (line.quantity === null) {
-    return "—";
-  }
-  const quantity = line.quantity.toLocaleString("es-ES", {
-    maximumFractionDigits: 3,
-  });
-  return line.unitName ? `${quantity} ${line.unitName}` : quantity;
-}
-
-/**
- * Los impuestos de UNA línea, de subtítulo bajo el concepto.
- *
- * `amountCents` es `number | null` —`normalizeTaxes` lo llena con `readCents`—
- * y el hueco llega hasta `PimiaAmount` en vez de formatearse como cero: un IVA
- * ilegible escrito «0,00 €» afirma que la línea no lleva impuesto, y la etiqueta
- * de al lado, que sigue diciendo «IVA 21%», demuestra que es falso.
- *
- * 👤 **Esto era una quinta columna hasta el 2026-08-18, y no cabía**: la tabla
- * pedía 545 px de mínimo medidos y a 1024 px de ventana la tarjeta le da 424, o
- * sea que el `overflow-hidden` del papel se comía la columna del importe y el
- * total sin barra y sin aviso. Se adopta la forma de la maqueta —el impuesto
- * bajo el concepto— pero **con la cuota**, que es lo que allí falta: sin ella
- * una factura que mezcla IVA e IRPF no se cuadra a mano. Lo único que se pierde
- * es la vertical de las cuotas, y esa se lee en el pie, de donde sale la casilla
- * del 303. Sin etiqueta, o sin importe, esto no se puede repetir. Y una línea
- * sin impuestos no pinta nada: la raya decía «no se pudo leer», que de subtítulo
- * sería falso.
- */
-function TaxLines({ taxes }: { taxes: PimiaEstimateTax[] | null }) {
-  if (!taxes || taxes.length === 0) {
-    return null;
-  }
-  return (
-    <span className="mt-1 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
-      {taxes.map((tax) => (
-        // El par entero NO va `whitespace-nowrap`: partible, el mínimo de la
-        // columna es el mayor de los dos trozos y no su suma —y ese mínimo es
-        // el que decide si la tabla cabe—. El importe sí es indivisible.
-        <span key={tax.id}>
-          {taxLabel(tax)}{" "}
-          <PimiaAmount
-            cents={tax.amountCents}
-            className="whitespace-nowrap text-foreground"
-          />
-        </span>
-      ))}
-    </span>
-  );
-}
-
-/**
- * Una fila del pie de totales: la etiqueta pegada al importe, a la derecha,
- * como en una factura de papel.
- *
- * ⚠️ **`amountCents` admite `null` a propósito y ese `null` tiene que llegar
- * entero hasta `PimiaAmount`.** Hasta el 2026-08-18 el tipo era `number`, y el
- * «Total» en negrita llamaba con `invoice.totalCents ?? 0`: el hueco moría en
- * el llamante, antes de que la celda de dinero —que sí sabe distinguirlo—
- * pudiera pintar la raya.
- *
- * Y el hueco no es teórico: `readCents` lee la cadena decimal que este ERP manda
- * hoy (`"1000.00"` → 1000) pero devuelve `null` ante un decimal con céntimos de
- * verdad (`"1234.56"`), que ya sería otra unidad. O sea que aparece cuando el
- * servidor **cambia la forma** de un importe sin avisar, y `due_amount` ya
- * demostró que eso pasa. El día que pase, la misma factura pintaba «—» en la
- * lista, se le caía el pie «Total en pantalla»... y aquí, donde más se mira,
- * decía «Total 0,00 €» en negrita: quien confunde «no se pudo leer lo que debe»
- * con «debe cero» da el documento por saldado. Por eso no hay ni un `?? 0`, y el
- * énfasis no enciende la raya —decisión 2 de `PimiaAmountCell`.
- */
-function DocumentTotalRow({
-  amountCents,
-  divider,
-  emphasis,
-  label,
-}: {
-  amountCents: number | null;
-  /** Raya de separación encima, para el total. */
-  divider?: boolean;
-  emphasis?: boolean;
-  label: string;
-}) {
-  const edge = divider ? "border-t border-border" : undefined;
-  const head = cn(
-    "px-0 pb-0 pt-4",
-    emphasis
-      ? "font-semibold text-foreground"
-      : "font-normal text-muted-foreground",
-    edge,
-  );
-  return (
-    <tr>
-      {/* El rótulo va DOS veces, como en la maqueta, porque `colSpan` no
-          entiende de saltos: bajo `sm`, cantidad y precio son `display:none` y
-          salen de la tabla, así que uno fijo reclamaba columnas que ya no
-          estaban y echaba los totales 122 px a la derecha —medidos en un móvil
-          de 375— de las cifras que suman. */}
-      <th className={cn(head, "text-left sm:hidden")} scope="row">
-        {label}
-      </th>
-      <th
-        className={cn(head, "hidden text-right sm:table-cell")}
-        colSpan={3}
-        scope="row"
-      >
-        {label}
-      </th>
-      <td className={cn("pb-0 pr-0 pt-4 text-right", GUTTER, edge)}>
-        <PimiaAmount
-          cents={amountCents}
-          className={cn(
-            // Sin esto el «€» del total cuelga en un segundo renglón: la
-            // columna la dimensiona el importe de línea, a 14 px, y el total
-            // va a 18. Los de las líneas ya lo llevaban.
-            "whitespace-nowrap",
-            emphasis
-              ? "text-lg font-semibold text-foreground"
-              : "text-sm text-foreground",
-          )}
-        />
-      </td>
-    </tr>
-  );
-}
-
-/** Una casilla del identificador del documento (fecha, vencimiento, serie…). */
-function DocumentField(props: { children: React.ReactNode; label: string }) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-muted-foreground">{props.label}</dt>
-      <dd className="mt-1 font-medium text-foreground">{props.children}</dd>
-    </div>
-  );
-}
-
-/* Una fecha en `<time>`: ISO cruda en el atributo, forma CORTA en el texto —
- * «18 de agosto de 2026» no cabe en las casillas de 78 px en que queda esta
- * rejilla cuando el papel se parte en dos, y salía repartida en tres renglones. */
-function DocumentDate(props: { label: string; value: string | null }) {
-  return (
-    <DocumentField label={props.label}>
-      {props.value ? (
-        <time dateTime={props.value}>{formatIsoDateShort(props.value)}</time>
-      ) : (
-        <span className="text-muted-foreground">—</span>
-      )}
-    </DocumentField>
-  );
-}
-
-/**
- * Los datos fiscales de la empresa que emite, para el membrete.
- *
- * 📌 **Debería vivir en `hooks/usePimiaResources.ts`** —el docblock de
- * `fetchCompanyProfile` así lo pide—, y está aquí solo porque el rediseño y el
- * ensanche del normalizador se hicieron en carriles separados y el fichero de
- * hooks no era de ninguno de los dos. Al subirla, de paso lo que allí ya está
- * anotado: hoy hay **tres** consultas que piden `/bootstrap` entero para sacar
- * unos campos cada una, y lo suyo es una sola de la que cuelguen por `select`.
- * La clave copia la forma de las demás para que la invalidación por tenant siga
- * alcanzándola.
- */
-function useCompanyProfileQuery() {
-  const tenant = useActivePimiaTenant();
-
-  return useQuery({
-    queryKey: ["pimia", "data", tenant?.id ?? "none", "company-profile"],
-    queryFn: fetchCompanyProfile,
-    enabled: Boolean(tenant),
-    staleTime: 10 * 60 * 1000,
-  });
-}
-
-/**
- * El membrete: quién emite la factura.
- *
- * 👤 **Decisión tomada: se enseña solo lo que exista, y lo que falta no deja
- * hueco.** No es precaución teórica — el tenant real de pruebas trae la razón
- * social y **nada más** (ni dirección, ni teléfono, ni NIF, ni logo), así que su
- * estado normal hoy es **una sola línea**. Cada renglón se omite entero: ni
- * etiquetas sueltas, ni separadores colgando, ni contenedores vacíos que aportan
- * margen. Mientras la consulta vuela, o si se cae, el membrete tampoco se pinta:
- * un rectángulo gris donde va la razón social se lee como un fallo de impresión.
- * ⛔ Y sin logotipo: `CompanyResource` publica `logo` y `logo_path`, pero nadie
- * ha comprobado si son URL o ruta, y una imagen rota en la cabecera de una
- * factura es peor que ninguna.
- */
-function CompanyLetterhead() {
-  const company = useCompanyProfileQuery().data;
-
-  if (!company) {
-    return null;
-  }
-
-  const heading = company.name ?? company.tradeName;
-  const details = [
-    ...addressLines(company.address),
-    company.address?.phone ?? null,
-    company.taxId ? `NIF: ${company.taxId}` : null,
-  ].filter((line): line is string => Boolean(line));
-
-  if (!heading && details.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="mt-6" data-testid="pimia-invoice-letterhead">
-      {heading ? (
-        <h2 className="text-lg font-semibold tracking-tight text-foreground">
-          {heading}
-        </h2>
-      ) : null}
-      {/* Solo cuando dice algo que la razón social no diga ya. */}
-      {company.tradeName && company.tradeName !== heading ? (
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          {company.tradeName}
-        </p>
-      ) : null}
-      {details.length > 0 ? (
-        <div className="mt-3 space-y-1 text-xs leading-5 text-muted-foreground">
-          {details.map((line) => (
-            <p key={line}>{line}</p>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
+export {
+  DOCUMENT_PLACEMENT,
+  joinParts,
+} from "@/features/pimia/ui/PimiaDocumentParts";
 
 /**
  * «Facturar a»: a quién se le factura y con qué identidad fiscal.
@@ -379,14 +127,9 @@ function BillTo({ invoice }: { invoice: PimiaInvoice }) {
       aria-labelledby={BILL_TO_TITLE_ID}
       className="min-w-0 border-t border-border pt-5"
     >
-      {/* Sin redondear a propósito: esquinas vivas, que es lo que lo lee como
-          el sello de un documento y no como una insignia más. */}
-      <h2
-        className="inline-flex bg-muted px-2.5 py-1 text-xs font-semibold text-foreground"
-        id={BILL_TO_TITLE_ID}
-      >
+      <DocumentSectionTitle id={BILL_TO_TITLE_ID}>
         Facturar a
-      </h2>
+      </DocumentSectionTitle>
       <div className="mt-5 text-xs leading-5">
         <p className="text-base font-semibold text-foreground">
           {invoice.customerName ?? (
@@ -563,7 +306,7 @@ export function InvoiceDocument({ invoice }: { invoice: PimiaInvoice }) {
         className="-mx-4 -mt-5 h-1.5 bg-primary sm:-mx-6 xl:-mx-8 xl:-mt-8"
       />
 
-      <CompanyLetterhead />
+      <CompanyLetterhead testId="pimia-invoice-letterhead" />
 
       <div className="mt-6 grid grid-cols-1 gap-7 xl:grid-cols-2">
         <BillTo invoice={invoice} />

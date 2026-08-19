@@ -1,196 +1,369 @@
 /**
- * La ficha de un presupuesto.
+ * La ficha de un presupuesto: **el papel** en el centro y, a la derecha, el raíl
+ * con lo que el papel no dice — en qué punto está el ciclo comercial.
  *
- * Patrón de detalle de la referencia: el número **es** el título, con su
- * estado al lado; los metadatos en pares etiqueta-valor; las líneas en una
- * tabla; y el desglose base → descuento → IVA → total al pie de esa tabla,
- * alineado con su columna de dinero.
+ * Hasta hoy eran dos tarjetas de etiqueta/valor («Presupuesto» y «Cliente»)
+ * encima de una tabla de cinco columnas: para saber a quién va, por cuánto y
+ * hasta cuándo vale había que recorrer tres cajas, y ninguna de las tres se
+ * parecía al documento que el destinatario recibe por correo. El rediseño llega
+ * junto con el ensanche de `normalizeEstimate`, y no por casualidad: el NIF del
+ * cliente, su dirección fiscal, **el lead al que va dirigido** y quién lo
+ * preparó **ya venían en la respuesta** de `GET /estimates/{id}` y se tiraban
+ * allí.
  *
- * Lo que esta pantalla NO hace, y es a propósito: recalcular. Los importes se
- * pintan tal como los devuelve el servidor —incluida la suma— porque las
- * invariantes fiscales son suyas y una segunda aritmética aquí solo serviría
- * para discrepar de la factura de verdad.
+ * ## Aquí está la pantalla; el papel vive en `PimiaEstimateDocument.tsx`
  *
- * ⚠️ **Las fechas pasan por `ui/pimiaDates`, no por `new Date()`.** Hasta el
- * 2026-08-18 esta ficha tenía su propio `formatDate` con un `new Date(value)`
- * sobre el `YYYY-MM-DD` de la API, que es **medianoche UTC**: al oeste de
- * Greenwich el «Vencimiento» se escribía un día antes del real. Y la ficha era
- * el peor sitio para que pasara, porque la tabla tenía su propio `formatDate`
- * con la misma avería pero **otro formato**, así que el mismo presupuesto podía
- * enseñar dos días distintos según por dónde se mirase y ninguno de los dos
- * delataba al otro. Ahora las dos pantallas comparten el mismo montaje a
- * mediodía local y solo cambia el largo del mes: `formatIsoDateLong` aquí, donde
- * sobra sitio, y `formatIsoDateShort` en la tabla, que compite por el ancho.
+ * El corte es el mismo que hizo la factura y no es aritmético: allí está **lo
+ * que el documento tiene que decir** y aquí **lo que hoy se puede hacer con
+ * él** —cabecera, acciones, el raíl del ciclo y la colocación de los dos—.
+ * ⚠️ Al portar son **TRES** ficheros para la lista `VERBATIM`: este, el
+ * documento y `PimiaDocumentParts.tsx`.
+ *
+ * ## Lo que NO se puede perder al releerlo
+ *
+ * Consisten todos en **no** pintar algo, y por eso un rediseño se los lleva por
+ * delante sin enterarse:
+ *
+ * - **Ni un `?? 0` en un importe.** El dinero pasa por `PimiaAmount`, que
+ *   distingue «vale cero» de «no se pudo leer». Hasta el 2026-08-18 el «Total»
+ *   en negrita de esta ficha llamaba con `?? 0`, así que un total ilegible se
+ *   leía «Total 0,00 €» en cuerpo grande mientras la fila del índice ya pintaba
+ *   su raya: la cifra más mirada de las tres era la única que mentía, y como
+ *   mentía con el aspecto exacto de un dato bueno, nadie tenía motivo para ir a
+ *   contrastarla.
+ * - **El desglose sale de `resolveDocumentTaxes`**, que agrega con `sumStrict`.
+ *   Uno por uno: el IVA y la retención de IRPF sumados dan un neto que esconde
+ *   las dos, y el campo `tax` **solo** entra cuando no hay desglose. Aquí llega
+ *   ya resuelto por `resolveEstimateTotals`, que es la misma lista que pinta el
+ *   pie del papel.
+ * - **Las fechas van por `ui/pimiaDates`, jamás por `new Date(cadena)`.** Esta
+ *   ficha tuvo su propio `formatDate` con medianoche UTC —al oeste de Greenwich,
+ *   un día antes— y la tabla tenía otro con **otro formato**: el mismo
+ *   presupuesto enseñaba dos días distintos y ninguno delataba al otro.
+ * - **Esta pantalla no recalcula.** Los importes se pintan tal como los devuelve
+ *   el servidor, suma incluida: las invariantes fiscales son suyas y una segunda
+ *   aritmética aquí solo serviría para discrepar de la factura de verdad.
+ *
+ * ⚠️ Y **ninguna frase de esta pantalla contiene el rótulo de una insignia ni el
+ * de la banda**: las insignias son «Borrador», «Enviado», «Visto», «Aceptado»,
+ * «Rechazado» y «Caducado» (`ESTIMATE_STATUS_META`), y la banda dice «Caduca» o
+ * «Caducó». Se ven a la vez, así que un `getByText('Aceptado')` casaría con dos
+ * elementos y la prueba moriría en `strict mode`. Peor que la prueba: quien lee
+ * el mismo rótulo dos veces a diez centímetros supone que son dos hechos
+ * distintos. Por eso las frases de `situationSentence` están escritas al revés
+ * de como se dirían en voz alta. **Y por eso la insignia de estado sale UNA vez,
+ * en la cabecera**: la maqueta la repite dentro de la tarjeta del ciclo, que es
+ * el mismo rótulo dos veces en la misma pantalla.
+ *
+ * ## Lo que el raíl NO puede decir, y por qué
+ *
+ * - **«Aceptado el …» y «Rechazado el …»**: `EstimateResource` **no publica ni
+ *   un instante de transición** (entre 3346 y 3384 no hay `accepted_at` ni
+ *   `rejected_at`) y no hay endpoint de actividades. La maqueta los fecha
+ *   derivándolos del estado actual, o sea que se los inventa. Solo la caducidad
+ *   tiene fecha de verdad, y solo ella tiñe la banda.
+ * - **«Convertido en la factura F-…»**: `convert-to-invoice` devuelve la factura
+ *   pero **el vínculo no queda persistido** —no existe `converted_to_invoice_id`
+ *   en el recurso—, así que al recargar se pierde. Prometer un enlace que
+ *   desaparece al refrescar es peor que no ofrecerlo. Se reporta.
+ * - **«Motivo del rechazo»**: el cuerpo de `POST /estimates/{id}/status` es
+ *   `{status}` a secas. No hay campo donde guardarlo. Se reporta.
+ * - **«Etapa» y «Origen» de la oportunidad**: existen en `LeadResource`
+ *   (3971-3972) pero **no en la proyección `lead`** que trae el presupuesto
+ *   (3387-3393), y sacarlos exigiría un `GET /leads/{id}` con `crm:read`, que el
+ *   grant del escritorio no pide.
  */
 
-import * as React from "react";
-import type { ReactNode } from "react";
-import { ArrowLeft, Copy, User } from "lucide-react";
+import { ArrowLeft, Copy, TriangleAlert, User } from "lucide-react";
 
 import { useAppNavigation } from "@/app/navigation/useAppNavigation";
-import type {
-  PimiaEstimateLine,
-  PimiaEstimateTax,
-} from "@/features/pimia/api/estimates";
-import { resolveDocumentTaxes, taxLabel } from "@/features/pimia/lib/taxes";
+import type { PimiaEstimate } from "@/features/pimia/api/estimates";
+import { todayIso } from "@/features/pimia/lib/calendar";
+import { daysBetween } from "@/features/pimia/lib/civilDates";
+import {
+  estimateExpiryWarning,
+  isOpenEstimate,
+} from "@/features/pimia/lib/estimates";
 import { useActivePimiaTenant } from "@/features/pimia/hooks/usePimiaAuth";
 import { usePimiaEstimateQuery } from "@/features/pimia/hooks/usePimiaResources";
 import {
-  PimiaAmount,
-  PimiaAmountCell,
-} from "@/features/pimia/ui/PimiaAmountCell";
-import { formatIsoDateLong } from "@/features/pimia/ui/pimiaDates";
+  CARD,
+  DOCUMENT_PLACEMENT,
+  LAYOUT_GRID,
+  RailRow,
+} from "@/features/pimia/ui/PimiaDocumentParts";
 import { PimiaEstimateActions } from "@/features/pimia/ui/PimiaEstimateActions";
+import {
+  EstimateDocument,
+  estimateGoesToLead,
+  PimiaLeadChip,
+} from "@/features/pimia/ui/PimiaEstimateDocument";
+import { formatIsoDateShort } from "@/features/pimia/ui/pimiaDates";
 import { PimiaPageHeader } from "@/features/pimia/ui/PimiaPageHeader";
 import { PimiaEstimateStatusBadge } from "@/features/pimia/ui/PimiaStatusBadge";
 import {
   PimiaEmpty,
   PimiaErrorState,
   PimiaNotConnected,
-  PimiaRowsSkeleton,
 } from "@/features/pimia/ui/PimiaStates";
 import { Button } from "@/shared/ui/button";
 import { DropdownMenuItem } from "@/shared/ui/dropdown-menu";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/shared/ui/table";
+import { Skeleton } from "@/shared/ui/skeleton";
+import { cn } from "@/shared/lib/cn";
 
-/** `2` → `2`; `2,5` → `2,5`. Sin decimales de adorno. */
-function formatQuantity(line: PimiaEstimateLine) {
-  if (line.quantity === null) {
-    return "—";
-  }
-  const quantity = line.quantity.toLocaleString("es-ES", {
-    maximumFractionDigits: 3,
-  });
-  return line.unitName ? `${quantity} ${line.unitName}` : quantity;
-}
+/* Los `id` que atan cada sección del raíl con su `<h2>`. Constantes de módulo y
+ * no `useId()`: `aria-labelledby` los necesita **estables** entre renders. */
+const CYCLE_TITLE_ID = "pimia-estimate-cycle-title";
 
 /**
- * Una tarjeta de datos con sus pares etiqueta-valor, como las dos que el panel
- * de Pimia pone en la cabecera de un presupuesto.
+ * En qué punto está el presupuesto, dicho con una frase.
+ *
+ * ⚠️ **Ninguna contiene el rótulo de su insignia** (ver la cabecera del
+ * fichero), y por eso están escritas al revés de como se dirían: «Ya salió» y no
+ * «Enviado», «dijo que sí» y no «Aceptado». Tampoco llevan dentro «Caduca» ni
+ * «Caducó», que son los rótulos de la banda que queda cuatro renglones más
+ * abajo.
+ *
+ * `null` para un estado que la API devuelva y no conozcamos: la insignia ya lo
+ * pinta en crudo, y una frase inventada sobre un estado desconocido afirmaría
+ * saber lo que no se sabe.
  */
-function FieldCard({
-  rows,
-  title,
+function situationSentence(
+  estimate: PimiaEstimate,
+  today: string,
+): string | null {
+  /* «El plazo se agotó» solo se puede decir con una fecha que se entienda:
+   * `daysBetween` devuelve `null` ante cualquier cosa que no sea un
+   * `YYYY-MM-DD` existente, y entonces aquí no se afirma nada del plazo. */
+  const days = daysBetween(today, estimate.expiryDate);
+  const outOfTime = days !== null && days < 0;
+
+  switch (estimate.status) {
+    case "DRAFT":
+      return estimate.customerId || estimate.leadId
+        ? "Todavía sin salir: el destinatario no lo conoce."
+        : "Sin destinatario asignado todavía.";
+    case "SENT":
+      return outOfTime
+        ? "Salió, y el plazo se agotó sin respuesta."
+        : "Ya salió; a la espera de respuesta.";
+    case "VIEWED":
+      return outOfTime
+        ? "El destinatario lo abrió, y el plazo se agotó sin decisión."
+        : "El destinatario lo ha abierto; sin decisión todavía.";
+    case "ACCEPTED":
+      return "El destinatario dijo que sí: se puede pasar a factura.";
+    case "REJECTED":
+      return "El destinatario dijo que no.";
+    case "EXPIRED":
+      return "Se agotó el plazo sin respuesta.";
+    default:
+      return null;
+  }
+}
+
+type CycleBand = {
+  date: string;
+  label: string;
+  tone: "danger" | "warning" | "neutral";
+};
+
+/**
+ * La banda tintada del raíl: la única fecha del ciclo que el servidor publica.
+ *
+ * El rótulo y el tono los pone `estimateExpiryWarning` (`lib/estimates.ts`), que
+ * es el mismo cálculo que usa la columna «Válido hasta» del índice: dos avisos
+ * distintos sobre el mismo presupuesto en dos pantallas es cómo se aprende a no
+ * creerse ninguno. Cuando esa función calla por lejanía —falta más de una
+ * semana— la banda sigue, en neutro y con «Caduca» a secas: aquí hay sitio para
+ * decir la fecha aunque no haya nada que avisar.
+ *
+ * `null` en tres casos, y los tres son «no hay nada que decir»: el ciclo ya se
+ * cerró por otro camino (`ACCEPTED`, `REJECTED`) o el servidor ya estampó
+ * `EXPIRED` —y entonces lo dice la insignia, sin repetirlo dos centímetros más
+ * allá—; no hay fecha de caducidad, que es un presupuesto sin plazo y no un dato
+ * roto; o la fecha no se entiende, y un plazo inventado sobre una fecha ilegible
+ * es la misma mentira que un 0 en el sitio de una raya.
+ */
+function resolveCycleBand(
+  estimate: PimiaEstimate,
+  today: string,
+): CycleBand | null {
+  const expiryDate = estimate.expiryDate;
+  if (!isOpenEstimate(estimate.status) || expiryDate === null) {
+    return null;
+  }
+  if (daysBetween(today, expiryDate) === null) {
+    return null;
+  }
+  const warning = estimateExpiryWarning({
+    expiryDate,
+    status: estimate.status,
+    today,
+  });
+  return {
+    date: expiryDate,
+    label: warning?.text ?? "Caduca",
+    tone: warning?.tone ?? "neutral",
+  };
+}
+
+/* Ámbar para el plazo que se acaba, rojo para el que ya pasó, y sin tinte
+ * cuando sobra tiempo. Ni un color literal: los tres salen de tokens del tema,
+ * y el ámbar del `bg-warning-bg` es el mismo que usa el «vence pronto» de la
+ * lista de facturas. */
+const BAND_TONES: Record<CycleBand["tone"], string> = {
+  danger: "bg-destructive/10 text-destructive",
+  warning: "bg-warning-bg text-warning",
+  neutral: "bg-muted text-foreground",
+};
+
+/**
+ * El raíl del ciclo: lo que el papel no dice. El papel lleva el desglose porque
+ * es lo que un documento tiene que llevar; aquí va **en qué punto está el
+ * trato**, que cambia mientras el documento sigue igual — por eso el total se
+ * repite: sin él, la banda del plazo no tiene con qué compararse.
+ *
+ * ⛔ **El desglose fiscal NO se repite aquí, y la maqueta sí lo repite.** Base,
+ * cuota por tipo y total salen ya en el pie del papel, que es donde un documento
+ * los lleva; copiarlos al raíl pone las mismas cinco cifras dos veces en la
+ * misma pantalla, y dos cifras iguales a diez centímetros invitan a buscarles la
+ * diferencia. Es la regla que dejó escrita el raíl de la factura, palabra por
+ * palabra: allí va **el estado**, no el desglose. Lo único que se repite es el
+ * **Total**, y por la razón que dice esa misma nota: sin él, la banda del plazo
+ * no tiene con qué compararse.
+ *
+ * ⛔ **Aquí NO hay bloque «Lead del CRM», y la maqueta sí lo tiene.** Allí ese
+ * bloque enseña cuatro renglones —Etapa, Origen, Contacto y Correo— y **dos de
+ * los cuatro no existen**: `stage` y `source` están en `LeadResource` pero no en
+ * la proyección `lead` que trae el presupuesto. Quitados esos dos, lo que queda
+ * es el nombre y el correo, que es **exactamente** lo que el papel ya escribe en
+ * «Presupuesto para», a diez centímetros y en la misma pantalla. Repetirlo no
+ * añade un dato: añade una segunda copia del mismo dato que hay que mantener de
+ * acuerdo, y un `getByText` con el correo del lead que casa dos veces. El raíl
+ * habla del **ciclo**; de a quién va, habla el papel. 🔓 El día que la
+ * proyección publique `stage` y `source` —es el reporte a plataforma con mejor
+ * relación coste/valor de este trabajo—, el bloque vuelve, y entonces sí dirá
+ * algo que el papel no dice.
+ */
+function CycleCard({
+  estimate,
+  today,
 }: {
-  rows: Array<{ label: string; value: ReactNode }>;
-  title: string;
+  estimate: PimiaEstimate;
+  today: string;
 }) {
+  const sentence = situationSentence(estimate, today);
+  const band = resolveCycleBand(estimate, today);
+
   return (
-    <section className="min-w-0 flex-1 rounded-lg border border-border">
-      <h2 className="border-b border-border px-4 py-3 text-sm font-semibold text-foreground">
-        {title}
-      </h2>
-      <dl className="divide-y divide-border">
-        {rows.map((row) => (
-          <div
-            className="flex items-baseline justify-between gap-4 px-4 py-2.5"
-            key={row.label}
+    <section
+      aria-labelledby={CYCLE_TITLE_ID}
+      className={cn("overflow-hidden", CARD)}
+      data-testid="pimia-estimate-cycle"
+    >
+      <div className="p-4 sm:p-5">
+        <h2 className="font-semibold text-foreground" id={CYCLE_TITLE_ID}>
+          Ciclo
+        </h2>
+        {sentence ? (
+          <p className="mt-1 text-xs text-muted-foreground">{sentence}</p>
+        ) : null}
+
+        {/* Lo único que el raíl dice del destinatario, porque es lo único que
+            no es un dato suyo sino una cosa que hacer: sin dirección,
+            `sendEstimate` no tiene a quién mandarlo y la acción primaria de
+            arriba se queda a medias. Exige `lead` cargado y `email` vacío: con
+            la relación sin cargar no se sabe si tiene correo, y afirmar que no
+            lo tiene sería inventar un motivo para no poder mandarlo. */}
+        {estimateGoesToLead(estimate) &&
+        estimate.lead !== null &&
+        estimate.lead.email === null ? (
+          <p
+            className="mt-3 flex items-start gap-2 text-xs text-warning"
+            data-testid="pimia-estimate-lead-no-mail"
           >
-            <dt className="shrink-0 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
-              {row.label}
-            </dt>
-            <dd className="min-w-0 truncate text-sm text-foreground">
-              {row.value}
-            </dd>
-          </div>
-        ))}
-      </dl>
+            <TriangleAlert
+              aria-hidden="true"
+              className="mt-0.5 h-3.5 w-3.5 shrink-0"
+            />
+            <span>
+              La oportunidad no tiene correo en el CRM: para mandarlo hay que
+              escribir la dirección a mano.
+            </span>
+          </p>
+        ) : null}
+
+        <dl className="mt-5 text-sm">
+          <RailRow
+            amountCents={estimate.totalCents}
+            amountClassName="text-xl font-semibold"
+          >
+            <span className="font-semibold text-foreground">Total</span>
+          </RailRow>
+        </dl>
+      </div>
+
+      {/* La banda envuelve y la fecha no encoge, por lo mismo que cuenta
+          `RailRow`: a 1024 px el raíl deja 190 px útiles y «Caducó hace 12
+          días» más la fecha no caben en una línea. */}
+      {band ? (
+        <div
+          className={cn(
+            "flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-border px-4 py-3 sm:px-5",
+            BAND_TONES[band.tone],
+          )}
+          data-testid="pimia-estimate-expiry"
+        >
+          <span className="min-w-0 text-sm font-semibold">{band.label}</span>
+          <time
+            className="ml-auto shrink-0 text-lg font-semibold tabular-nums"
+            dateTime={band.date}
+          >
+            {formatIsoDateShort(band.date)}
+          </time>
+        </div>
+      ) : null}
     </section>
   );
 }
 
 /**
- * Los impuestos de una celda: el nombre a la izquierda y el importe a la
- * derecha, en columna. Puestos en una sola cadena («IVA 21% 525,00 €») el ojo
- * no encuentra dónde empieza el dinero, que es justo lo que hay que poder
- * comparar entre líneas.
- *
- * ⚠️ El importe sale por `PimiaAmount`, no por `formatCents`. El `amountCents`
- * de un impuesto de línea es `number | null` —`readCents` devuelve `null`
- * cuando el `amount` del impuesto llega en una forma que no sabe leer— y el
- * `?? 0` que había aquí hasta el 2026-08-18 lo pintaba «0,00 €» en la columna
- * de Impuestos. Un IVA que de verdad vale cero y un IVA que no se pudo leer se
- * veían carácter por carácter igual, y el de cero es el que invita a pensar en
- * una exención y a no volver a mirar.
+ * Con la forma de lo que sustituye —papel a la izquierda, raíl a la derecha— y
+ * no la de una tabla: el `PimiaRowsSkeleton` de `PimiaStates` dibuja filas, y
+ * usarlo aquí hacía saltar la pantalla entera al llegar los datos.
  */
-function TaxLines({ taxes }: { taxes: PimiaEstimateTax[] | null }) {
-  if (!taxes || taxes.length === 0) {
-    return <span className="text-muted-foreground">—</span>;
-  }
+function EstimateDocumentSkeleton() {
   return (
-    <span className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
-      {taxes.map((tax) => (
-        <React.Fragment key={tax.id}>
-          <span className="whitespace-nowrap text-muted-foreground">
-            {taxLabel(tax)}
-          </span>
-          <PimiaAmount
-            cents={tax.amountCents}
-            className="whitespace-nowrap text-right text-foreground"
-          />
-        </React.Fragment>
-      ))}
-    </span>
+    <div className={LAYOUT_GRID} data-testid="pimia-loading">
+      <div className="space-y-4 rounded-xl border border-border bg-card p-4 sm:p-5 lg:col-start-3 lg:row-start-1">
+        <Skeleton className="h-3.5 w-16" />
+        <Skeleton className="h-6 w-28" />
+      </div>
+      <div className={cn("overflow-hidden", CARD, DOCUMENT_PLACEMENT)}>
+        <div className="h-1.5 bg-muted" />
+        <div className="space-y-4 p-6">
+          <Skeleton className="h-4 w-48" />
+          <Skeleton className="h-3 w-full" />
+          <Skeleton className="ml-auto h-5 w-40" />
+        </div>
+      </div>
+    </div>
   );
 }
 
 /**
- * Una línea del desglose. Cada una solo aparece si el concepto viene en el
- * documento —quien llama decide eso—, pero el importe **entra como
- * `number | null`** y baja tal cual a `PimiaAmount`, que ya sabe que un hueco
- * se pinta con una raya y no con un cero.
+ * A quién va, en una línea, para el subtítulo de la cabecera.
  *
- * ⚠️ Hasta el 2026-08-18 el tipo era `number` a secas, y por eso los llamantes
- * se lo daban con un `?? 0` — incluido el «Total» en negrita de la ficha. Esa
- * anotación era la que mataba el hueco: un presupuesto cuyo `total` llega en
- * una forma que `readCents` no sabe leer se pintaba «—» en la fila de la lista,
- * desaparecía del pie «Total en pantalla»… y al abrir la ficha el usuario leía
- * **«Total 0,00 €»** en cuerpo grande. La cifra más mirada de las tres era la
- * única que seguía mintiendo, y como mentía con el aspecto exacto de un dato
- * bueno, nadie tenía motivo para ir a contrastarla con las otras dos.
- *
- * El `emphasis` manda en el tamaño y en el peso, nunca en el color del hueco:
- * `PimiaAmount` pone su `text-muted-foreground` **después** del `className`, así
- * que un total ilegible sale grande pero apagado. Se ve que falta; no se lee
- * como un dato enfático.
+ * `undefined` —y no una raya— cuando no se sabe: `PimiaPageHeader` omite el
+ * renglón entero, que es lo que hay que hacer con un borrador sin destinatario.
  */
-function TotalsRow({
-  amountCents,
-  emphasis,
-  label,
-}: {
-  amountCents: number | null;
-  emphasis?: boolean;
-  label: string;
-}) {
-  return (
-    <div className="flex items-baseline justify-between gap-6">
-      <span
-        className={
-          emphasis
-            ? "text-sm font-semibold text-foreground"
-            : "text-sm text-muted-foreground"
-        }
-      >
-        {label}
-      </span>
-      <PimiaAmount
-        cents={amountCents}
-        className={
-          emphasis
-            ? "text-lg font-semibold text-foreground"
-            : "text-sm text-foreground"
-        }
-      />
-    </div>
-  );
+function recipientLabel(estimate: PimiaEstimate): string | undefined {
+  if (estimate.customerName) {
+    return estimate.customerName;
+  }
+  const lead = estimate.lead;
+  return lead?.personName ?? lead?.organizationName ?? lead?.title ?? undefined;
 }
 
 export function PimiaEstimateScreen({ estimateId }: { estimateId: string }) {
@@ -209,15 +382,16 @@ export function PimiaEstimateScreen({ estimateId }: { estimateId: string }) {
   }
 
   const estimate = query.data;
-  const lines = estimate?.lines ?? [];
-  const documentTaxes = resolveDocumentTaxes(
-    estimate?.taxes ?? null,
-    estimate?.lines ?? null,
-  );
+  /* El día LOCAL de quien mira, calculado UNA vez y bajado a las dos piezas que
+   * lo necesitan: la frase y la banda tienen que estar de acuerdo. Sin el
+   * `setInterval` del índice —una ficha se abre y se cierra, no se deja puesta
+   * cruzando la medianoche—, y el peor caso es un plazo de un día viejo hasta
+   * que se recarga. */
+  const today = todayIso();
 
   return (
-    <div className="flex h-full flex-col gap-5 overflow-y-auto p-6">
-      {query.isPending ? <PimiaRowsSkeleton rows={4} /> : null}
+    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-6 sm:gap-6">
+      {query.isPending ? <EstimateDocumentSkeleton /> : null}
 
       {estimate ? (
         <>
@@ -227,36 +401,40 @@ export function PimiaEstimateScreen({ estimateId }: { estimateId: string }) {
               // (`PimiaEstimateActions`), así que «ver el cliente» baja al
               // menú: dos botones compitiendo por el mismo sitio dejan de
               // decir cuál es el siguiente paso.
-              <div className="flex items-center gap-2">
-                <PimiaEstimateActions
-                  estimate={estimate}
-                  navigationItems={
-                    <>
-                      {estimate.customerId ? (
-                        <DropdownMenuItem
-                          onSelect={() =>
-                            void goPimiaCustomer(estimate.customerId as string)
-                          }
-                        >
-                          <User className="h-4 w-4" />
-                          Ver el cliente
-                        </DropdownMenuItem>
-                      ) : null}
+              <PimiaEstimateActions
+                estimate={estimate}
+                navigationItems={
+                  <>
+                    {/* ⚠️ Este `if` era una trampa hasta hoy: `customerId`
+                        valía la CADENA `"null"` en un presupuesto emitido a un
+                        lead —`String(null)`, que es *truthy*—, así que la ficha
+                        ofrecía «Ver el cliente» y navegaba a `/customers/null`.
+                        Arreglado en `normalizeEstimate`; aquí queda la otra
+                        mitad: sin cliente, no hay entrada. */}
+                    {estimate.customerId ? (
                       <DropdownMenuItem
-                        onSelect={() => {
-                          void navigator.clipboard?.writeText(
-                            estimate.estimateNumber,
-                          );
-                        }}
+                        onSelect={() =>
+                          void goPimiaCustomer(estimate.customerId as string)
+                        }
                       >
-                        <Copy className="h-4 w-4" />
-                        Copiar el número
+                        <User className="h-4 w-4" />
+                        Ver el cliente
                       </DropdownMenuItem>
-                    </>
-                  }
-                  showPrimaryAction
-                />
-              </div>
+                    ) : null}
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        void navigator.clipboard?.writeText(
+                          estimate.estimateNumber,
+                        );
+                      }}
+                    >
+                      <Copy className="h-4 w-4" />
+                      Copiar el número
+                    </DropdownMenuItem>
+                  </>
+                }
+                showPrimaryAction
+              />
             }
             back={
               <Button
@@ -269,160 +447,26 @@ export function PimiaEstimateScreen({ estimateId }: { estimateId: string }) {
                 Presupuestos
               </Button>
             }
-            description={estimate.customerName ?? undefined}
-            meta={<PimiaEstimateStatusBadge status={estimate.status} />}
+            description={recipientLabel(estimate)}
+            meta={
+              <span className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                <PimiaEstimateStatusBadge status={estimate.status} />
+                {/* El eje que un presupuesto tiene y una factura no: a quién va
+                    dirigido. Se decide por `lead_id`, que llega siempre que
+                    haya lead, y no por la relación `lead`, que es opcional. */}
+                {estimateGoesToLead(estimate) ? <PimiaLeadChip /> : null}
+              </span>
+            }
             title={<span className="font-mono">{estimate.estimateNumber}</span>}
           />
 
-          <div className="flex shrink-0 flex-col gap-4 lg:flex-row">
-            <FieldCard
-              rows={[
-                { label: "Número", value: estimate.estimateNumber },
-                {
-                  label: "Fecha",
-                  value: formatIsoDateLong(estimate.estimateDate),
-                },
-                {
-                  label: "Vencimiento",
-                  value: formatIsoDateLong(estimate.expiryDate),
-                },
-                {
-                  label: "Referencia",
-                  value: estimate.referenceNumber ?? "—",
-                },
-              ]}
-              title="Presupuesto"
-            />
-            <FieldCard
-              rows={[
-                { label: "Cliente", value: estimate.customerName ?? "—" },
-                { label: "Email", value: estimate.customerEmail ?? "—" },
-                { label: "Teléfono", value: estimate.customerPhone ?? "—" },
-              ]}
-              title="Cliente"
-            />
-          </div>
-
-          <section className="space-y-3">
-            <h2 className="text-sm font-semibold text-foreground">Líneas</h2>
-            {estimate.lines === null || lines.length === 0 ? (
-              <PimiaEmpty
-                description="El presupuesto no tiene conceptos, o el servidor no los devolvió con la ficha."
-                title="Sin líneas"
-              />
-            ) : (
-              <div className="overflow-hidden rounded-lg border border-border">
-                <Table data-testid="pimia-estimate-lines">
-                  <TableHeader>
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead className="w-full pl-3">Concepto</TableHead>
-                      <TableHead className="w-28 whitespace-nowrap">
-                        Cantidad
-                      </TableHead>
-                      <TableHead className="w-32 whitespace-nowrap text-right">
-                        Precio
-                      </TableHead>
-                      <TableHead className="w-52 whitespace-nowrap">
-                        Impuestos
-                      </TableHead>
-                      <TableHead className="w-32 whitespace-nowrap pr-3 text-right">
-                        Importe
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {lines.map((line) => (
-                      <TableRow key={line.id}>
-                        <TableCell className="max-w-0 py-2.5 pl-3">
-                          <span className="block truncate font-medium text-foreground">
-                            {line.name}
-                          </span>
-                          {line.description ? (
-                            <span className="block truncate text-xs text-muted-foreground">
-                              {line.description}
-                            </span>
-                          ) : null}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap py-2.5 tabular-nums text-muted-foreground">
-                          {formatQuantity(line)}
-                        </TableCell>
-                        <PimiaAmountCell
-                          cents={line.priceCents}
-                          className="py-2.5 font-normal text-muted-foreground"
-                          dimZero={false}
-                        />
-                        <TableCell className="py-2.5">
-                          <TaxLines taxes={line.taxes} />
-                        </TableCell>
-                        <PimiaAmountCell
-                          cents={line.totalCents}
-                          className="py-2.5 pr-3"
-                          dimZero={false}
-                        />
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </section>
-
-          <section className="flex justify-end">
-            <div className="w-full space-y-2 rounded-lg border border-border p-4 sm:w-80">
-              {estimate.subTotalCents !== null ? (
-                <TotalsRow
-                  amountCents={estimate.subTotalCents}
-                  label="Base imponible"
-                />
-              ) : null}
-              {estimate.discountCents ? (
-                <TotalsRow
-                  amountCents={-estimate.discountCents}
-                  label="Descuento"
-                />
-              ) : null}
-              {/* Uno por uno: el IVA y la retención de IRPF sumados dan un
-                  neto que esconde las dos. Si el documento los lleva por
-                  línea, se agregan de ahí — igual que hace el panel.
-
-                  El importe baja sin `?? 0`, y desde el 2026-08-18 el hueco
-                  está cerrado **también río arriba**: `resolveDocumentTaxes`
-                  (`lib/taxes.ts`) agrega con `sumStrict`, así que un importe
-                  ilegible deja el total de ESE impuesto en `null` en vez de
-                  disolverse en un cero. Antes solo se conservaba cuando el
-                  impuesto aparecía en una única línea, o sea que el mismo
-                  documento mentía o no según cuántas líneas tuviera. */}
-              {documentTaxes.length > 0 ? (
-                documentTaxes.map((tax) => (
-                  <TotalsRow
-                    amountCents={tax.amountCents}
-                    key={tax.id}
-                    label={taxLabel(tax)}
-                  />
-                ))
-              ) : estimate.taxCents !== null ? (
-                <TotalsRow amountCents={estimate.taxCents} label="Impuestos" />
-              ) : null}
-              <div className="border-t border-border pt-2">
-                <TotalsRow
-                  amountCents={estimate.totalCents}
-                  emphasis
-                  label="Total"
-                />
-              </div>
+          <div className={LAYOUT_GRID}>
+            <div className="min-w-0 lg:col-start-3 lg:row-start-1">
+              <CycleCard estimate={estimate} today={today} />
             </div>
-          </section>
 
-          {estimate.notes ? (
-            <section className="shrink-0 rounded-lg border border-border">
-              <h2 className="border-b border-border px-4 py-3 text-sm font-semibold text-foreground">
-                Notas
-              </h2>
-              <p className="whitespace-pre-wrap p-4 text-sm text-muted-foreground">
-                {estimate.notes}
-              </p>
-            </section>
-          ) : null}
+            <EstimateDocument estimate={estimate} />
+          </div>
         </>
       ) : null}
 
