@@ -71,8 +71,14 @@ test("la rectificativa se crea en negativo y la ficha aterriza en ella", async (
   // ficha es la suya.
   await expect(page.getByRole("heading", { name: /FAC-R-\d+/ })).toBeVisible();
   await expect(page.getByText("Factura rectificativa")).toBeVisible();
-  // Los importes llegan en negativo del servidor y se pintan tal cual.
-  await expect(page.getByText("-17.426,40", { exact: false })).toBeVisible();
+  // Los importes llegan en negativo del servidor y se pintan tal cual. Se
+  // busca DENTRO del papel a propósito: el total se repite en el raíl —sin él
+  // la banda de pendiente no tiene con qué compararse— y otra vez en la
+  // identidad del documento, así que un `getByText` suelto casa con tres
+  // elementos y la prueba muere en `strict mode` sin que nada esté mal.
+  await expect(page.getByTestId("pimia-invoice-document")).toContainText(
+    "-17.426,40",
+  );
   await shoot(page, "rectificativa-creada");
 });
 

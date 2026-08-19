@@ -10,10 +10,38 @@
  * - **El importe enseña debajo lo pendiente**, que es la cifra que se mira en
  *   una factura — la base ya la enseña la ficha.
  * - Las **rectificativas** se señalan junto al número, no se esconden. Y la
- *   factura que corrigen también: cuando el neto de rectificativas no coincide
- *   con el nominal, la fila lo dice y enseña debajo el neto. La cifra grande
- *   sigue siendo la nominal a propósito — es el importe legal del documento, y
- *   es por la que ordena el servidor.
+ *   factura corregida también, con una marca «Rectificada» que puede salir de
+ *   dos sitios, porque el dato bueno no siempre está:
+ *   1. `credit_notes_count`, que lo dice el servidor sin adivinar y además
+ *      dice **cuántas**.
+ *   2. La vieja **heurística** de que `effective_total` no coincida con
+ *      `total`, para cuando el recuento no llega.
+ *   ⚠️ En este índice el recuento no llega **nunca**: la lista pide
+ *   `view=summary`, y esa vista ligera trae los `effective_*` pero no
+ *   `credit_notes_count` (ni `rectified_invoice_number`: del enlace manda
+ *   `rectified_invoice_id`, un id que no se le enseña a nadie). No es que el
+ *   campo sea «opcional» —en el contrato está declarado sin `?`, es de los
+ *   pocos atributos obligatorios del recurso—: es que **esta consulta no lo
+ *   pide**. Por eso aquí manda la heurística. Acierta de casualidad —los dos
+ *   importes también difieren por otras razones, y con uno ilegible
+ *   (`readCents` → `null`) la comparación no dice nada y la marca desaparece
+ *   sin más—, pero es el único indicio que la vista ligera trae, y callarse
+ *   que una factura está rectificada es peor: quien mire la lista vería el
+ *   importe nominal sin ninguna señal de que hay una rectificativa contra él.
+ *   Donde el recuento sí llega —la ficha, que pide el recurso entero, o el día
+ *   que alguien pase filas completas a esta tabla— manda él, y entonces la
+ *   marca dice «2 rectificativas» donde la resta solo sabía que algo había
+ *   cambiado. La cifra grande sigue siendo la nominal a propósito — es el
+ *   importe legal del documento, y es por la que ordena el servidor; debajo va
+ *   el neto.
+ * - **La columna «Vence» avisa de lo que está por vencer**, que es la mitad que
+ *   faltaba: la insignia de cobro dice «Vencida» (lo dicta el servidor) pero
+ *   nada decía «vence en 3 días», y una lista en la que la que vence mañana se
+ *   ve igual que la que vence en noviembre no sirve para cobrar. La regla vive
+ *   en `lib/invoices.ts` con sus pruebas, compara **cadenas** de fecha y deja el
+ *   rojo en manos del servidor; aquí solo se pinta.
+ *   ⚠️ `today` **baja como prop**, no se calcula por fila: cien filas serían
+ *   cien relojes, y podrían cruzar la medianoche a mitad de tabla.
  * - **Las fechas pasan por `formatIsoDateShort`**, nunca por `new Date(...)`.
  *   Hasta el 2026-08-18 esta tabla montaba la fecha con `new Date("2026-08-18")`,
  *   que no es el 18 de agosto sino **medianoche UTC** del 18: al oeste de
@@ -43,6 +71,10 @@ import type {
   PimiaInvoice,
   PimiaInvoiceSortField,
 } from "@/features/pimia/api/invoices";
+import {
+  invoiceDueWarning,
+  isCollectableInvoice,
+} from "@/features/pimia/lib/invoices";
 import { formatCents } from "@/features/pimia/lib/money";
 import { PimiaAmountCell } from "@/features/pimia/ui/PimiaAmountCell";
 import { formatIsoDateShort } from "@/features/pimia/ui/pimiaDates";
@@ -55,6 +87,7 @@ import {
   PimiaInvoiceStatusBadge,
 } from "@/features/pimia/ui/PimiaStatusBadge";
 import { PimiaInvoiceActions } from "@/features/pimia/ui/PimiaInvoiceActions";
+import { cn } from "@/shared/lib/cn";
 import { DropdownMenuItem } from "@/shared/ui/dropdown-menu";
 import {
   Table,
@@ -77,6 +110,17 @@ type PimiaInvoiceListProps = {
   showCustomer?: boolean;
   sort?: PimiaInvoiceSort;
   /**
+   * El día de HOY en `YYYY-MM-DD` **local**, para el aviso de vencimiento.
+   *
+   * Baja como prop —y memoizado en la pantalla— a propósito: si cada fila
+   * mirase el reloj serían cien relojes, y una sesión abierta a medianoche
+   * podría pintar media tabla contra un «hoy» y la otra media contra otro. Y es
+   * el día local de quien mira (`todayIso`), no el de UTC: con
+   * `new Date().toISOString()` una factura que vence hoy saldría vencida a la
+   * una de la madrugada española.
+   */
+  today: string;
+  /**
    * Suma de lo que hay en pantalla, al pie.
    *
    * `null` **esconde el pie entero**, y es la única respuesta honesta cuando
@@ -95,6 +139,7 @@ export function PimiaInvoiceList({
   onSortChange,
   showCustomer = true,
   sort,
+  today,
   totalCents,
 }: PimiaInvoiceListProps) {
   const isSortable = Boolean(sort && onSortChange);
@@ -151,13 +196,35 @@ export function PimiaInvoiceList({
       </TableHeader>
       <TableBody>
         {invoices.map((invoice) => {
-          // Neto de rectificativas. `effective_*` los precalcula el servidor;
-          // cuando no vienen (un servidor sin la vista ligera de facturas), se
-          // cae al nominal y la fila se pinta exactamente como antes.
-          const isRectified =
+          /* El neto NO coincide con el nominal. `effective_*` los precalcula el
+           * servidor; cuando no vienen (un servidor sin la vista ligera de
+           * facturas) esto es `false` y la fila se pinta como antes.
+           *
+           * Hace dos trabajos: enseña el neto bajo el importe y, mientras el
+           * recuento de rectificativas no llegue —que en este índice es
+           * siempre—, es lo único que delata que la factura está rectificada. */
+          const hasDifferentNet =
             invoice.effectiveTotalCents !== null &&
             invoice.effectiveTotalCents !== invoice.totalCents;
           const pendingCents = invoice.effectiveDueCents ?? invoice.dueCents;
+          /* Cuántas rectificativas se han emitido contra esta factura, dicho
+           * por el servidor. `null` es «no lo sé», y en este índice es lo que
+           * llega en TODA fila: `view=summary` no manda `credit_notes_count`.
+           * Entonces —y solo entonces— decide la heurística del neto. Un `0`
+           * de verdad es otra cosa: es «no hay ninguna», y apaga la marca
+           * aunque el neto difiera, porque el servidor ya ha contado. */
+          const creditNotesCount = invoice.creditNotesCount;
+          const isRectified =
+            creditNotesCount === null ? hasDifferentNet : creditNotesCount > 0;
+          const warning = invoiceDueWarning({
+            dueDate: invoice.dueDate,
+            isCollectable: isCollectableInvoice(invoice),
+            // El mismo criterio que la insignia de cobro de esta misma fila:
+            // el vencimiento NETO cuando el servidor lo publica. Si las dos
+            // leyeran cosas distintas, la fila se contradiría a sí misma.
+            isOverdue: invoice.effectiveOverdue ?? invoice.isOverdue,
+            today,
+          });
 
           return (
             <TableRow
@@ -197,10 +264,32 @@ export function PimiaInvoiceList({
                     Rectificativa
                   </span>
                 ) : null}
-                {/* El otro extremo del mismo enlace: la factura corregida. */}
+                {/* El otro extremo del mismo enlace: la factura corregida.
+                    Con varias se dice cuántas, porque una factura rectificada
+                    dos veces no cuenta la misma historia que una rectificada
+                    una — pero eso solo lo sabe `credit_notes_count`. Cuando la
+                    marca viene de la heurística del neto, «Rectificada» a secas
+                    es todo lo que se puede afirmar sin inventarse un número. */}
                 {isRectified ? (
                   <span className="ml-2 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Rectificada
+                    {creditNotesCount !== null && creditNotesCount > 1
+                      ? `${creditNotesCount} rectificativas`
+                      : "Rectificada"}
+                  </span>
+                ) : null}
+                {/* A qué factura corrige esta rectificativa. Sin el número no
+                    se pinta la línea: un id pelado no es un número de factura,
+                    y «rectifica —» no le dice nada a nadie.
+                    ⚠️ Hoy, en el índice, no se pinta nunca: `view=summary`
+                    manda `rectified_invoice_id` y no el número. Está escrito
+                    para el día que esta tabla reciba filas completas, no es una
+                    capacidad que el listado tenga ya. */}
+                {invoice.isCreditNote && invoice.rectifiedInvoiceNumber ? (
+                  <span className="block text-xs font-normal text-muted-foreground">
+                    rectifica{" "}
+                    <span className="font-mono">
+                      {invoice.rectifiedInvoiceNumber}
+                    </span>
                   </span>
                 ) : null}
               </TableCell>
@@ -214,6 +303,19 @@ export function PimiaInvoiceList({
               </TableCell>
               <TableCell className="whitespace-nowrap py-2.5 text-muted-foreground">
                 {formatIsoDateShort(invoice.dueDate)}
+                {warning ? (
+                  <span
+                    className={cn(
+                      "block text-xs",
+                      warning.tone === "danger"
+                        ? "text-destructive"
+                        : "text-warning",
+                    )}
+                    data-testid={`pimia-invoice-due-warning-${invoice.id}`}
+                  >
+                    {warning.text}
+                  </span>
+                ) : null}
               </TableCell>
               <TableCell className="py-2.5">
                 <PimiaInvoiceStatusBadge status={invoice.status} />
@@ -237,11 +339,12 @@ export function PimiaInvoiceList({
                 cents={invoice.totalCents}
                 className="py-2.5"
                 hint={
-                  // Rectificada: la cifra de arriba es el importe legal del
-                  // documento y aquí va lo que queda de él, que es lo que se
-                  // cobra. Si no, lo pendiente — y solo cuando no es ni cero ni
-                  // el total entero: en esos dos la cifra de arriba ya lo dice.
-                  isRectified
+                  // Neto distinto del nominal: la cifra de arriba es el importe
+                  // legal del documento y aquí va lo que queda de él, que es lo
+                  // que se cobra. Si no, lo pendiente — y solo cuando no es ni
+                  // cero ni el total entero: en esos dos la cifra de arriba ya
+                  // lo dice.
+                  hasDifferentNet
                     ? `Neto ${formatCents(invoice.effectiveTotalCents)}`
                     : pendingCents !== null &&
                         pendingCents > 0 &&
