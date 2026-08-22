@@ -250,6 +250,21 @@ async function seedChannelActivity(
   }
 }
 
+/**
+ * Aparta el cursor del disparador del popover.
+ *
+ * Divergencia Pimia: upstream se movía al punto fijo (900, 680), que con su
+ * barra a la izquierda queda lejos de todo. Aquí la barra de Buzz está a la
+ * **derecha** y el popover de actividad se abre hacia la izquierda
+ * (`data-side="left"`), sobre el área de contenido: ese punto cae **dentro**
+ * del popover cuando lleva dos entradas, así que el hover no se soltaba nunca.
+ * La cabecera del canal está siempre arriba a la izquierda, fuera del popover
+ * en los dos anfitriones.
+ */
+async function moveCursorAwayFromSidebar(page: Page) {
+  await page.getByTestId("chat-title").hover();
+}
+
 async function openActivityPopover(page: Page) {
   await page.getByTestId("channel-general").hover();
   const popover = page.getByTestId("channel-activity-popover-general");
@@ -574,7 +589,7 @@ test.describe("channel activity hover preview", () => {
     await page.getByTestId("channel-general").click();
     await expect(page.getByTestId("chat-title")).toHaveText("general");
     await expect(page.getByTestId("channel-unread-dot-general")).toBeVisible();
-    await page.mouse.move(900, 680);
+    await moveCursorAwayFromSidebar(page);
     let popover = await openActivityPopover(page);
     await expect(popover.getByTestId(/^channel-activity-item-/)).toHaveCount(2);
     await expect(popover).toContainText("Older Inbox thread reopened");
@@ -587,7 +602,7 @@ test.describe("channel activity hover preview", () => {
       .getByRole("button", { name: /Open thread/ })
       .click();
     await expect(popover).toBeHidden();
-    await page.mouse.move(900, 680);
+    await moveCursorAwayFromSidebar(page);
     popover = await openActivityPopover(page);
     await expect(popover.getByTestId(/^channel-activity-item-/)).toHaveCount(1);
     await expect(popover).not.toContainText("Older Inbox thread reopened");
@@ -597,7 +612,7 @@ test.describe("channel activity hover preview", () => {
       "400",
     );
 
-    await page.mouse.move(900, 680);
+    await moveCursorAwayFromSidebar(page);
     await expect(popover).toBeHidden();
     await page.getByRole("button", { name: "Inbox", exact: true }).click();
     const topLevelItemId = "top-level-inbox-item-for-channel-read";
