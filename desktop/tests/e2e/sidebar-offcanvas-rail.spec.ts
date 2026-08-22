@@ -72,8 +72,14 @@ for (const theme of ["buzz", "buzz-dark", "vesper"]) {
       const trigger = document.querySelector<HTMLElement>(
         '[data-sidebar="trigger"]',
       );
+      // Divergencia Pimia: aquí hay DOS barras, y la del ERP se pinta antes en
+      // el DOM. Un `document.querySelector` sin acotar cogía su superficie —que
+      // a 960 px ya está plegada a iconos y no transiciona—, así que el
+      // `transitionrun` no llegaba nunca y el test agotaba los 30 s. El
+      // disparador de arriba sí es el de Buzz sin acotar (el chrome va primero),
+      // pero la superficie hay que buscarla dentro de `app-sidebar`.
       const sidebarContent = document.querySelector<HTMLElement>(
-        "[data-sidebar-transition-content]",
+        '[data-testid="app-sidebar"] [data-sidebar-transition-content]',
       );
       if (!(rail instanceof HTMLElement) || !trigger || !sidebarContent) {
         return null;
