@@ -1179,3 +1179,57 @@ sobraba y se toma el `deny.toml` de upstream tal cual.
 **La lección, que ya estaba escrita y no se siguió:** la cadencia es «cada
 release, o semanal». Nueve releases de retraso convirtieron un merge mecánico en
 uno que obliga a reescribir divergencias. La próxima vez, antes.
+
+### 2026-08-22 — CI por rutas: un patrón negado hacía correr el escritorio en PRs de solo documentación
+
+**El síntoma.** El PR [#31](https://github.com/Pimia-AI/pimia-workspace/pull/31)
+cambiaba **un fichero, `docs/DECISIONES.md`**, y arrancó el paquete entero de
+escritorio: Desktop Core, build de macOS, 4 shards de smoke y 2 de integración.
+~25 minutos de Actions por una línea de markdown.
+
+**La causa, en el log de `Detect Changed Paths`:**
+
+```
+Filter desktop = true
+Matching files:
+docs/DECISIONES.md [modified]
+```
+
+El filtro `desktop` de upstream lleva `- '!desktop/src-tauri/**'`. Y
+`dorny/paths-filter` corre con `predicate-quantifier: some` por defecto: un
+filtro casa si **alguno** de sus patrones casa. Un patrón negado casa con todo
+lo que esté **fuera** de lo negado — así que `docs/DECISIONES.md` casaba, y el
+filtro salía `true`. Los filtros `web` y `mobile` no llevan negación y sí se
+quedaban en `false`: la asimetría es la que delata que esto es un fallo de
+upstream, no una intención.
+
+**El arreglo: quitar esa línea.** Es la divergencia más pequeña que resuelve el
+problema; `predicate-quantifier: every` no vale, porque los demás filtros son
+listas de alternativas y las rompería.
+
+**No cambia nada de lo que sí debe correr.** La negación nunca excluyó nada:
+`desktop/src-tauri/x.rs` casa con `desktop/**` igualmente. Medido con picomatch
+4.0.4, que es el que usa la acción:
+
+| Fichero cambiado | `desktop` antes | `desktop` después |
+|---|---|---|
+| `docs/DECISIONES.md` | true | **false** |
+| `desktop/src/app/App.tsx` | true | true |
+| `desktop/src-tauri/src/lib.rs` | true | true |
+| `crates/buzz-relay/src/main.rs` | true | **false** |
+
+El último tampoco cambia qué se ejecuta: **ningún job se cierra sobre `desktop`
+a solas** — todos van con `desktop || desktop-rust || rust`, y ahí `rust` ya es
+`true`.
+
+**Qué vigilar en cada merge.** La divergencia es **una línea que no está**, y
+eso es justo lo que un merge vuelve a meter sin conflicto: si upstream toca el
+bloque `filters:`, git reintroducirá `- '!desktop/src-tauri/**'` en silencio.
+Comprobación de un vistazo tras cada sync:
+
+```bash
+grep -n "src-tauri" .github/workflows/ci.yml   # no debe salir dentro de `desktop:`
+```
+
+Y si algún día upstream arregla esto por su cuenta —el fallo es suyo—, tomarlo
+y borrar esta entrada.
