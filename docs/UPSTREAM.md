@@ -1136,3 +1136,81 @@ son la única divergencia en ellos: si un merge trae cambios en la cabecera de
 esos jobs, conservar el gate. Y si algún día upstream mete el
 `create || edit` idempotente en `sprig.yml` —es un fallo legítimo suyo, no
 nuestro—, tomarlo sin problema: el gate lo sigue apagando aquí.
+
+### 2026-08-22 — Sync a `desktop-v0.5.18`: la barra lateral de upstream se rehizo
+
+Merge de sincronización de nueve releases de golpe (0.5.9 → 0.5.18, **174
+commits**). El ciclo no se había corrido desde el 08-11, y esto es exactamente
+lo que la sección «La estrategia» avisa que pasa: no fueron 4 ficheros en
+conflicto sino **19**, y tres de ellos obligaron a reescribir la forma de una
+divergencia. Se anota aquí, y no solo en el PR, por eso.
+
+**Lo que upstream rediseñó y cómo quedó la divergencia:**
+
+| Divergencia | Antes | Después del merge |
+|---|---|---|
+| **Dos barras** (`AppShell.tsx`) | `PimiaSidebar` a la izquierda, `AppSidebar` a la derecha con `side="right"` | igual, pero dentro de la estructura nueva de upstream: `AppWorkflowEditorOverlayProvider` envuelve todo y `AppShellChannelSurface` va dentro de `TerminalContextOverrideProvider`. La barra de Buzz se movió a *después* de la superficie otra vez |
+| **Props de `AppSidebar`** | tipo en línea en `AppSidebar.tsx`, con `selectedView: AppView` importado para no repetir la unión | upstream extrajo el tipo a `AppSidebar.types.ts`. Las dos divergencias (`selectedView: AppView` y `side?: "left" \| "right"`) se mudaron ahí |
+| **El menú navega solo** (`AppSidebarPrimaryMenu`) | `useAppNavigation()` en vez de `onSelectX` del shell | se conserva. Upstream pasó a cablear `onSelectAgents/Projects/Pulse/Workflows` desde `AppShell`; aquí siguen resolviéndose dentro. Sí entra `projectsOverviewActive`, que es dato y no callback |
+| **Disparador de la barra a la derecha** (`AppTopChrome`) | iconos `PanelRightClose/Open`, disparador al final de la fila | se conserva. Upstream introdujo `DrawerPanelIcon`, que asume barra a la izquierda: no se usa aquí. El `div` portal `#app-top-chrome-content` de upstream entra, y el disparador va detrás |
+| **Despeje de los semáforos** (`AppTopChrome`) | `pl-[80px]` siempre | igual. Upstream lo condiciona a `hasCommunityRail` porque su rail está a la izquierda; el nuestro está a la derecha, así que `AppTopChrome` **no recibe** esa prop |
+| **Provider de barra por «scope»** (`sidebar-provider.tsx`) | extraído de `sidebar.tsx` para poder montar dos barras | se conserva. Se trajo de upstream la constante `MOBILE_ACTION_HIT_AREA`, que vivía en el bloque que aquí no existe |
+| **`dragSidebarRail`** | en `tests/helpers/sidebar.ts`, parametrizado por lado | se conserva; la copia local que upstream volvió a meter en `sidebar.spec.ts` se descarta, y su test nuevo entra |
+| **`deep_link.rs` y `lib.rs`** | `install()` + el brazo `oauth` de Pimia | upstream renombró `install` → `install_deep_link_handlers` y le añadió el arranque en frío de Windows/Linux. **`install()` era código de upstream, no nuestro**: se toma el suyo. El brazo `oauth` y los siete comandos `pimia_*` siguen |
+
+**Los de regla fija**, sin sorpresas: `tauri.conf.json` (identidad nuestra,
+versión suya), `package.json` (versión suya; nuestro `check` con
+`check:file-sizes` y `check:pimia-boundary`), `Cargo.toml`/`Cargo.lock`
+(versión), `pnpm-lock.yaml` (regenerado), `CHANGELOG.md` y
+`.release/desktop-candidate.json` (bookkeeping suyo), `ci.yml` (auto-mergeado;
+el recorte de plataformas intacto), `AGENTS.md` (las dos secciones conviven).
+
+**`deny.toml`: la divergencia desaparece.** Ignorábamos `RUSTSEC-2026-0243`
+(`nostr-relay-pool` sin mantenimiento) porque `mesh-llm` fijaba `nostr-sdk
+0.44.1`. Upstream ya va en **0.45.1** y la crate no está en el lock: la entrada
+sobraba y se toma el `deny.toml` de upstream tal cual.
+
+**Y es lo que cura el job Security**, que llevaba rojo en `main` desde el
+2026-08-19 por dos vulnerabilidades que solo se arreglan actualizando:
+`RUSTSEC-2026-0258` (`h2` 0.4.14 → **0.4.16**, DATA frames vacíos sin límite) y
+`RUSTSEC-2026-0257` (`webbrowser` 1.2.1 → **1.2.4**, inyección de argumentos por
+`BROWSER` en Unix). Ninguna era de Pimia: eran deriva por no sincronizar.
+
+**Tres specs nuevos de upstream que la segunda barra tumbaba.** No salieron en
+los conflictos —son ficheros que aquí no existían— sino en el primer CI, y son
+el caso de libro de la entrada «El coste horizontal de la segunda barra»:
+
+| Spec | Qué asumía | Cómo se arregló |
+|---|---|---|
+| `sidebar-offcanvas-rail.spec.ts` (los 3 temas) | que `[data-sidebar-transition-content]` sin acotar es la superficie de Buzz | la del ERP se pinta antes en el DOM y a 960 px ya está plegada a iconos: no transiciona, y el `transitionrun` no llegaba nunca (30 s de timeout ×3). Se acota a `[data-testid="app-sidebar"] …`, que es el patrón que el propio `sidebar.spec.ts` de upstream ya usa |
+| `project-pr-review.spec.ts:1778` | `feedBox.width > 600` | aritmética: el ERP plegado añade 48 px de cromo, así que el feed mide **593**. El umbral baja los mismos 48 (`> 550`) y conserva el margen |
+| `projects-v3-screenshots.spec.ts:775` | que el panel principal plegado llega al **borde derecho de la ventana** | ese borde lo ocupa la barra de Buzz, que aquí está a la derecha: sobraban 308 px (300 + el margen de 8). Se mide contra el borde izquierdo de `app-sidebar`, que es donde acaba de verdad el contenido |
+
+Los tres verificados en local contra el árbol mergeado: 10 + 43 tests en verde.
+
+**Y tres más en la segunda vuelta de CI**, del mismo linaje salvo el primero:
+
+| Qué falló | Causa | Arreglo |
+|---|---|---|
+| `composer-tooltip-dismiss.spec.ts`, los 4 tests | **el que de verdad importa**: `shared/ui/sidebar-provider.tsx` es un fork del `sidebar.tsx` de la 0.5.9, que envolvía en `<TooltipProvider delayDuration={0}>`. Upstream lo quitó en la 0.5.18 y estrenó specs que dependen del dwell por defecto. Nuestro fork se quedó con el `0` | quitar `delayDuration={0}` — es un cambio de upstream que el fork se había perdido, no una divergencia |
+| `channel-activity-popover.spec.ts:492` | el test aparta el cursor a un punto fijo, `(900, 680)`. Con la barra de Buzz a la derecha, el popover de actividad se abre hacia la **izquierda** y ese punto cae **dentro** de él: el hover no se soltaba nunca | apartarlo a `chat-title`, que está arriba a la izquierda en los dos anfitriones |
+| `project-commit-detail.spec.ts:507` | `locator('[data-sidebar="content"]')` casa con **dos** elementos y el modo estricto aborta | acotar a `app-sidebar` |
+
+⚠️ **La lección del `delayDuration`, que vale para todo fork de un fichero de
+upstream:** un conflicto de merge avisa de lo que cambia en el fichero
+original; un fichero **extraído** no genera conflicto nunca y se queda atrás en
+silencio. Tras cada sync conviene diffear a mano `sidebar-provider.tsx` contra
+el bloque equivalente del `sidebar.tsx` de upstream:
+
+```bash
+git show desktop-vX.Y.Z:desktop/src/shared/ui/sidebar.tsx | sed -n '/^const SIDEBAR_COOKIE/,/^SidebarProvider.displayName/p'
+```
+
+`onboarding-agent-defaults.spec.ts:908`, `persistent-agent-audience.spec.ts` y
+`huddle-transcription.spec.ts:759` salieron **flaky** (pasan al reintentar), y
+son código y tests de upstream sin divergencia nuestra por medio. No se tocan.
+
+**La lección, que ya estaba escrita y no se siguió:** la cadencia es «cada
+release, o semanal». Nueve releases de retraso convirtieron un merge mecánico en
+uno que obliga a reescribir divergencias — y a adaptar specs nuevos que nunca
+habrían llegado de tres en tres. La próxima vez, antes.

@@ -15,21 +15,6 @@ ignore = [
     # remove these when upstream catches up.
     { id = "RUSTSEC-2026-0194", reason = "transitive via rust-s3 and mesh-llm→plist; trusted-input XML only; no upstream fix available yet" },
     { id = "RUSTSEC-2026-0195", reason = "transitive via rust-s3 and mesh-llm→plist; trusted-input XML only; no upstream fix available yet" },
-    # nostr-relay-pool 0.44.3 — unmaintained as a standalone crate; upstream folded
-    # it into nostr-sdk >= 0.45.0. Not a vulnerability, and nothing we depend on
-    # directly: the chain is mesh-llm-client / mesh-llm-host-runtime (git pin
-    # v0.74.0) → nostr-sdk 0.44.1 → nostr-relay-pool. Our own crates use plain
-    # `nostr` 0.44, never nostr-sdk.
-    #
-    # Not fixable on our side: mesh-llm requires `nostr-sdk = "0.44.1"`, so
-    # `cargo update` cannot reach 0.45 (semver-incompatible), and the newest
-    # mesh-llm tag (v0.75.0) still pins 0.44.1 — bumping the pin would not drop
-    # the crate. Resolution has to come from mesh-llm moving to nostr-sdk 0.45+.
-    #
-    # Review by 2027-02-09 (cargo-deny 0.19 has no `expires` key, so the date
-    # lives here): re-check whether mesh-llm has bumped nostr-sdk and, if so,
-    # drop this entry along with the pin bump.
-    { id = "RUSTSEC-2026-0243", reason = "unmaintained-only; transitive via mesh-llm → nostr-sdk 0.44.1; fix requires upstream mesh-llm to move to nostr-sdk >= 0.45; review by 2027-02-09" },
 ]
 
 [licenses]
