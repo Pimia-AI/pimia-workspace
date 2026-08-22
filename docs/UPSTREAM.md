@@ -37,8 +37,8 @@ clonas de nuevo, repite ese paso.
 > dijeron otra cosa: upstream había movido 18 commits y una release, pero la
 > intersección entre lo que ellos tocaron y lo que nosotros tocamos era de
 > **4 ficheros**, todos con resolución mecánica. Mergear es barato si se hace
-> a menudo, y usamos el relay alojado por Block (`communities.buzz.xyz`), que
-> se actualiza a su calendario: quedarse atrás en protocolo no es una opción
+> a menudo, y usamos un relay alojado por Block, que se actualiza a su
+> calendario: quedarse atrás en protocolo no es una opción
 > que esté en nuestra mano. La política pasa a ser merge periódico.
 
 - **La unidad de sincronización es el tag de release de upstream**
@@ -91,8 +91,7 @@ No es una preferencia de diseño, es la regla que hace seguro todo el plan.
 
 Los mensajes de canal de Buzz **no van cifrados extremo a extremo**: el relay
 los guarda en claro en su Postgres para poder indexarlos (solo los DM usan
-NIP-17). El relay que usamos, `communities.buzz.xyz`, lo administra Block, no
-nosotros.
+NIP-17). El relay alojado que usamos lo administra Block, no nosotros.
 
 Por tanto:
 
@@ -129,7 +128,7 @@ esta sección hace falta un ejemplo, se inventa (`wss://<comunidad>...`,
 |---|---|---|
 | Este repo (git) | Nosotros — fork duro, cherry-picks a mano | Bajo: nada entra solo |
 | Adaptadores node-tools (npm) | El escritorio los instala/actualiza en `~/Library/Application Support/Buzz/node-tools/` | **Alto**: casi toda la receta de abajo depende de sus internals |
-| Relay alojado (`communities.buzz.xyz`) | Block, en su calendario | Medio: cubierto por la categoría «protocolo» de los cherry-picks |
+| Relay alojado | Block, en su calendario | Medio: cubierto por la categoría «protocolo» de los cherry-picks |
 
 La configuración local (llavero, settings, ficheros de instancia) no la toca
 ninguna actualización directamente — pero su *significado* depende de los
@@ -140,15 +139,16 @@ correr el smoke test del final.
 
 **1. Autenticación de los agentes claude.** El adaptador `claude-agent-acp`
 lanza el CLI nativo que empaqueta el Agent SDK, y ese CLI se autentica contra
-la entrada del llavero de macOS **«Claude Code-credentials»** — la misma que
-usa el CLI `claude` del usuario, y distinta del canal de auth de la app de
-escritorio de Claude. Por eso puede fallar toda la flota («401 OAuth access
-token has been revoked» en cada turno, lista de modelos vacía al crear agente)
-mientras las sesiones interactivas siguen funcionando. Arreglo: `claude /login`
-en un terminal reescribe el llavero; reiniciar los agentes después. Probe
-rápido sin Buzz: ejecutar el binario del SDK
-(`node-tools/lib/node_modules/@agentclientprotocol/claude-agent-acp/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude`)
-con `-p 'ok'`.
+**la credencial del llavero del sistema que usa el CLI de Claude Code** — la
+misma que la del terminal, y distinta del canal de auth de la app de escritorio
+de Claude. La consecuencia que importa: es un llavero **compartido por toda la
+flota**, así que una credencial caducada o revocada tumba a todos los agentes a
+la vez («401 OAuth access token has been revoked» en cada turno, lista de
+modelos vacía al crear agente) mientras las sesiones interactivas del terminal
+pueden seguir funcionando. Arreglo: volver a autenticar el CLI desde un
+terminal —eso reescribe el llavero— y reiniciar los agentes. Probe rápido sin
+Buzz: ejecutar el binario del SDK que cuelga del adaptador en `node-tools/` con
+`-p 'ok'`.
 
 **2. Permisos de ejecución.** Desde el sync de `desktop-v0.5.8` (registro:
 «Tomado el revert de upstream #5323»), el arnés **auto-aprueba** las
@@ -418,7 +418,7 @@ enchufarlo: `lib.rs` (el módulo, el estado gestionado y seis comandos) y
    negocio. De propina esto esquiva el CORS del origen `tauri://`.
 2. **Client público con PKCE S256 y registro dinámico (RFC 7591).** El tenant
    expone `registration_endpoint` y admite `token_endpoint_auth_method: none`
-   (verificado contra `sdkdemo.taskai.work`), así que la app se da de alta sola
+   (verificado contra un tenant de sandbox), así que la app se da de alta sola
    en cada tenant y no hay ningún secreto cableado en un binario que el usuario
    tiene en su disco.
 3. **El retorno del navegador va por loopback, con el esquema propio de
@@ -620,8 +620,8 @@ entrada siguiente.
 
 ### 2026-08-08 — `scripts/instance-env.sh` toma el checkout principal por un worktree
 
-**El síntoma que lo delató**: arrancando desde `/Volumes/data512/pimia-workspace`
-—el checkout principal, no un worktree— la app se presenta como «Pimia Workspace
+**El síntoma que lo delató**: arrancando desde el checkout principal del repo
+—no desde un worktree— la app se presenta como «Pimia Workspace
 Dev (fase1-cierre-login)», con icono etiquetado y un servicio de llavero
 `pimia-workspace-desktop-dev.claude-fase1-cierre-login`.
 

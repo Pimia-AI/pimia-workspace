@@ -144,7 +144,7 @@ autorizar».
 
 > ⚠️ **La API no manda `missing_scope`.** El guard deniega con
 > `{"message": "Token lacks the invoices:write scope"}` y nada más — no hay un
-> solo `missing_scope` en todo `app/` de factSaas. Sin rescatarlo del texto,
+> solo `missing_scope` en todo el núcleo. Sin rescatarlo del texto,
 > `PimiaErrorState` nunca llegaba a ofrecer «Volver a autorizar», que es la
 > única salida de un permiso que falta. Se rescata en `classify_error`
 > (`src-tauri/src/pimia/api.rs`), reconociendo esa forma exacta y ninguna otra.
@@ -159,12 +159,13 @@ del email del cliente y el mensaje de la plantilla de la empresa.
 remitente real del mensaje y es una propiedad de la instancia, no del envío.
 Hasta el 2026-08-09 la API lo exigía a quien llamaba — un dato que **ningún
 grant OAuth podía leer**, porque `GET /company/mail/config` cae en el dominio
-`settings` y `settings:read` no está en el catálogo (`config/oauth.php`), y un
-scope fuera del catálogo **se ignora en silencio** (`ScopeRegistry::parse`). Con
+`settings` y `settings:read` no está en el catálogo del Authorization Server, y
+un scope fuera del catálogo **se ignora en silencio**. Con
 eso, «enviar» era literalmente imposible desde fuera del panel.
 
-Se arregló en el ERP (galeote/factSaas **#314** y **#315**): lo pone el servidor
-con `TenantMailSettings::from()`, y el que mande un cliente **se ignora** —
+Se arregló en el núcleo: lo pone el servidor
+con el remitente configurado de la instancia, y el que mande un cliente
+**se ignora** —
 respetarlo dejaba mandar correo desde cualquier dirección por el SMTP de la
 empresa, con su SPF y su DKIM. Por eso este código **no manda `from`**: añadirlo
 no rompería nada, pero sería prometer una elección que no existe.
@@ -438,13 +439,13 @@ Así entraron `table` (cero dependencias nuevas) y `select`
 > investigado».** Primero este apartado decía que las acciones de documento se
 > quedaban fuera enteras; entraron cuatro en el pase de acciones. Después decía
 > que **enviar** era imposible por un scope que no existe — y lo era, hasta que
-> se arregló donde estaba el problema, que era el ERP (factSaas #314/#315,
-> desplegado el 2026-08-09). Solo queda fuera borrar, por la nota legal.
+> se arregló donde estaba el problema, que era el núcleo (desplegado el
+> 2026-08-09). Solo queda fuera borrar, por la nota legal.
 
 > **Corregido el 2026-08-08.** Este apartado decía que las cabeceras ordenables
 > y el filtro de fechas eran imposibles «porque la API no los acepta». Era
 > falso: `applyFilters` los soporta desde siempre. Se comprobó leyendo el
-> controlador en `factSaas` y contra el tenant real. Están implementados.
+> controlador en el núcleo y contra un tenant real. Están implementados.
 
 ## Cómo se mira
 
@@ -454,12 +455,21 @@ pantallas en claro y oscuro con datos del mock del ERP
 
 ```bash
 pnpm -C desktop build:e2e
-PLAYWRIGHT_BROWSERS_PATH=/Volumes/data512/.toolchains/ms-playwright \
+PLAYWRIGHT_BROWSERS_PATH="$TOOLCHAINS/ms-playwright" \
   pnpm -C desktop exec playwright test tests/e2e/pimia-screens-screenshots.spec.ts --project=smoke
 ```
 
-Las capturas salen en `desktop/test-results/pimia/`. Las del antes y el después
-de este pase están en `docs/assets/screenshots/pimia-*`.
+`$TOOLCHAINS` es el directorio del toolchain local; la variable solo hace falta
+si los navegadores de Playwright no están donde `pnpm` los busca por defecto.
+
+Las capturas salen en `desktop/test-results/pimia/`. Las de este pase están en
+`docs/assets/screenshots/pimia-*`.
+
+> Falta ahí la tanda de «antes» del panel, clientes y presupuestos: se tomó
+> contra un tenant real, antes de que el mock fijase un host de
+> documentación, y en un repo público el subdominio de un cliente sobra. Se
+> borraron en el barrido del 2026-08-22. Si hacen falta otra vez, se
+> regeneran con el spec, que ya solo pinta datos del mock.
 
 Las **acciones** tienen su propio spec, `pimia-estimate-actions.spec.ts`, y su
 propia carpeta (`test-results/pimia-acciones/`). Separados a propósito: aquel

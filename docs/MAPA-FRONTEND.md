@@ -87,7 +87,7 @@ convención de nombre de fichero:
 | Prefijo | Qué es | Cómo habla |
 |---|---|---|
 | `tauri*.ts` | El núcleo Rust de la app | `invoke()` sobre los **312 comandos** `#[tauri::command]` de `src-tauri/src/`. Permisos en `src-tauri/capabilities/default.json` |
-| `relay*.ts` | El relay Nostr | WebSocket a `wss://<comunidad>.communities.buzz.xyz`. Reconexión, reintentos, límites y presencia, todo aquí |
+| `relay*.ts` | El relay Nostr | WebSocket al relay de la comunidad (`wss://<comunidad>.<host-del-relay>`). Reconexión, reintentos, límites y presencia, todo aquí |
 
 **Y aquí es donde se apoya la frontera del plan.** Pimia es un tercer canal:
 HTTP contra la API de Pimia (SDK + OAuth), y nada más. La regla revisable, ya
@@ -285,9 +285,12 @@ sistema nuevo.
 ## 8. Cómo arrancarlo
 
 ```bash
-source /Volumes/data512/.toolchains/env.sh   # toolchain fuera del disco de arranque
+source "$TOOLCHAINS/env.sh"   # toolchain fuera del disco de arranque
 just desktop-standalone
 ```
+
+`$TOOLCHAINS` es el directorio donde tengas Rust, Node y los navegadores de
+Playwright. Sáltate esa línea si tu toolchain ya está en el `PATH`.
 
 `desktop-standalone` es la receta correcta para trabajar contra el relay
 hospedado: *«No relay, database, Docker, migrations, or .env are needed»*. No

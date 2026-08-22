@@ -169,7 +169,7 @@ pub(crate) fn tenant_id_for(base_url: &str) -> String {
     uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_URL, base_url.as_bytes()).to_string()
 }
 
-/// Etiqueta legible: el host del tenant (`sdkdemo.taskai.work`).
+/// Etiqueta legible: el host del tenant (`demo.example.com`).
 pub(crate) fn tenant_label_for(base_url: &str) -> String {
     url::Url::parse(base_url)
         .ok()
@@ -188,14 +188,14 @@ mod tests {
     #[test]
     fn normalizes_and_requires_https() {
         assert_eq!(
-            normalize_base_url("  sdkdemo.taskai.work/ "),
-            Ok("https://sdkdemo.taskai.work".to_string())
+            normalize_base_url("  demo.example.com/ "),
+            Ok("https://demo.example.com".to_string())
         );
         assert_eq!(
-            normalize_base_url("https://sdkdemo.taskai.work/"),
-            Ok("https://sdkdemo.taskai.work".to_string())
+            normalize_base_url("https://demo.example.com/"),
+            Ok("https://demo.example.com".to_string())
         );
-        assert!(normalize_base_url("http://sdkdemo.taskai.work").is_err());
+        assert!(normalize_base_url("http://demo.example.com").is_err());
         // http sigue valiendo en loopback: es el caso de un tenant local.
         assert!(normalize_base_url("http://localhost:8000").is_ok());
         assert!(normalize_base_url("   ").is_err());
@@ -203,16 +203,16 @@ mod tests {
 
     #[test]
     fn tenant_id_is_stable_and_distinct() {
-        let a = tenant_id_for("https://sdkdemo.taskai.work");
-        assert_eq!(a, tenant_id_for("https://sdkdemo.taskai.work"));
-        assert_ne!(a, tenant_id_for("https://otro.taskai.work"));
+        let a = tenant_id_for("https://demo.example.com");
+        assert_eq!(a, tenant_id_for("https://demo.example.com"));
+        assert_ne!(a, tenant_id_for("https://otro.example.com"));
     }
 
     #[test]
     fn label_is_the_host() {
         assert_eq!(
-            tenant_label_for("https://sdkdemo.taskai.work"),
-            "sdkdemo.taskai.work"
+            tenant_label_for("https://demo.example.com"),
+            "demo.example.com"
         );
     }
 
@@ -241,8 +241,8 @@ mod tests {
     fn tenant(id: &str) -> TenantConnection {
         TenantConnection {
             id: id.to_string(),
-            base_url: format!("https://{id}.taskai.work"),
-            label: format!("{id}.taskai.work"),
+            base_url: format!("https://{id}.example.com"),
+            label: format!("{id}.example.com"),
             client_id: "mcp_test".to_string(),
             tokens: TokenSet::default(),
             connected_at: 0,
@@ -283,12 +283,12 @@ mod tests {
     #[ignore = "requiere el llavero real del SO (se corre en local)"]
     #[test]
     fn the_token_set_survives_a_restart_and_the_rotated_refresh_replaces_it() {
-        let tenant_id = tenant_id_for("https://vault-test.taskai.work");
+        let tenant_id = tenant_id_for("https://vault-test.example.com");
         let mut vault = PimiaVault::default();
         vault.upsert(TenantConnection {
             id: tenant_id.clone(),
-            base_url: "https://vault-test.taskai.work".to_string(),
-            label: "vault-test.taskai.work".to_string(),
+            base_url: "https://vault-test.example.com".to_string(),
+            label: "vault-test.example.com".to_string(),
             client_id: "mcp_vault_test".to_string(),
             tokens: TokenSet {
                 access_token: "access-1".to_string(),
