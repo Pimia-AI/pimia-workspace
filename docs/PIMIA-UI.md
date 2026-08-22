@@ -447,6 +447,94 @@ Así entraron `table` (cero dependencias nuevas) y `select`
 > falso: `applyFilters` los soporta desde siempre. Se comprobó leyendo el
 > controlador en el núcleo y contra un tenant real. Están implementados.
 
+## Lo que la fase 2 tiene que traer, y no está aquí
+
+Inventario del 2026-08-22, medido comparando `desktop/src/features/pimia/` (54
+ficheros) con `pimia-web-shadcn/src/features/pimia/` (213). Las vistas están
+**congeladas** aquí y suben en bloque cuando la web llegue al 100 %
+(`docs/DECISIONES.md`); esto es lo que hay que tener listo **en el anfitrión**
+para que el bloque entre limpio.
+
+### Los primitivos: hechos
+
+`label`, `command` y `chart` —más `input-group`, del que cuelga `CommandInput`—
+ya están en `desktop/src/shared/ui/`, con `@radix-ui/react-label`, `cmdk` y
+`recharts`. Nadie los usa todavía. Con eso, los 18 primitivos que las vistas de
+la web importan existen a los dos lados.
+
+### El tema: decisión de 👤 — el ERP trae el suyo, y se aborda al final
+
+Es la única pieza que puede obligar a **editar vistas**, así que conviene tener
+clara la forma antes de que llegue el bloque.
+
+Los dos anfitriones no hablan el mismo dialecto de tokens:
+
+| | Web | Escritorio |
+|---|---|---|
+| Tailwind | v4 nativo: `@import "tailwindcss"` + `@theme inline` | v4 en modo compat: `@config "../../../tailwind.config.js"`, colores en JS |
+| Formato | valores completos — `--primary: #0f766e`, `--background: oklch(…)` | tripletas HSL — `--primary: 266 85.05% 58.04%`, envueltas con `hsl(var(--x))` |
+| Paleta | tema Pimia teal, en `src/app/globals.css` | Catppuccin (`shared/theme/`) |
+
+Y las vistas del ERP usan como **clases de Tailwind** unos tokens que aquí no
+existen: `text-warning` (23 usos), `text-success` (8), `bg-success` (6),
+`bg-warning` (6), `bg-chart-1..3` (6), `bg-funnel-1..4` (9),
+`border-success`/`border-warning` (4). El escritorio define `--chart-1..5` en
+CSS pero **no** los expone como color de Tailwind; `warning` apunta a
+`var(--ui-warning)`; `success` y `funnel-*` no existen.
+
+**La decisión: el ERP trae su propio `@theme`** —acotado a sus tokens, en el
+formato que ya usa (hex/oklch)— en vez de remapear las clases a Catppuccin. Y
+**se aborda al final**, después de subir las vistas, no antes: es la última
+pieza del orden de fases, no un requisito para empezar.
+
+Lo que eso implica cuando toque:
+
+- Un `@theme` propio del ERP, montado bajo el subárbol de sus pantallas, que
+  declare `success`, `warning`, `chart-1..5` y `funnel-1..4` como colores.
+  Convive con el `tailwind.config.js` de Buzz sin tocarlo.
+- Ninguna clase de las vistas cambia. Es justo el punto: que el bloque suba
+  **verbatim**.
+- Los tokens del ERP no se reciclan para Buzz ni al revés. Son dos temas, y la
+  frontera entre ellos es la misma frontera de siempre.
+
+⚠️ **Lo que sí hay que arreglar en la web antes de subir**, porque los guards de
+aquí lo rechazan: 4 ficheros por encima de las 1000 líneas
+(`check:file-sizes`), 15 `text-[Npx]` en 9 ficheros (`check:px-text`), y el
+`Badge variant="ghost"` de la web, que aquí no existe. Se arregla allí, que es
+donde viven las vistas.
+
+### El proxy no enumera rutas, y la web sí
+
+`pimia_api_request` (`desktop/src-tauri/src/pimia/api.rs`) es un proxy
+**genérico**: recibe `{method, path, query, body}` y reenvía. Valida el verbo
+—`parse_method` admite `GET/POST/PUT/PATCH/DELETE` y rechaza el resto— y
+normaliza la ruta, pero **no mira qué ruta es**. Hoy eso pasa desapercibido
+porque las vistas de este anfitrión llaman a **6** rutas distintas; las de la
+web llaman a **29**.
+
+La web sí tiene lista blanca: `src/server/allowedPaths.ts`, **44 reglas por
+método y ruta**, con sus tests. Su docblock explica el porqué mejor que
+cualquier resumen: el grant ya acota lo que se puede hacer, pero el puente lo
+abre quien tenga la sesión, y una lista explícita evita que un XSS lo convierta
+en un proxy general contra el tenant. Desde el 2026-08-21 mira **el método
+además de la ruta**, después de que seis renglones documentaran, cada uno, algo
+que su regla no cerraba.
+
+**En la fase 2 hará falta la equivalente aquí.** No es portar el fichero —el
+carril es otro: allí un route handler de Next, aquí Rust— pero sí el mismo
+contrato: reglas `{métodos, patrón}` sacadas de inventariar las llamadas que las
+vistas hacen de verdad, no de suponerlas, y que **falle cerrada** ante un verbo
+o una ruta que no case.
+
+Dos cosas que **no** cambian y conviene no confundir:
+
+- La lista no sustituye a los scopes. El techo de verdad lo pone el
+  Authorization Server; la lista es lo que impide que este anfitrión sea más
+  ancho que sus propias pantallas.
+- La frontera del relay sigue siendo otra cosa, y sigue vigente:
+  `check-pimia-boundary.mjs`, en `pnpm check`. Los datos del ERP no pasan por el
+  relay; esto va de que el puente al ERP no sea una puerta abierta.
+
 ## Cómo se mira
 
 `desktop/tests/e2e/pimia-screens-screenshots.spec.ts` retrata las cinco

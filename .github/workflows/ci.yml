@@ -50,11 +50,34 @@ jobs:
               - 'scripts/model-capabilities.json'
               - 'scripts/normative-corpus.json'
               - 'justfile'
+            # Divergencia Pimia: aquí upstream lleva además
+            # `- '!desktop/src-tauri/**'`. Con el `predicate-quantifier: some`
+            # que trae por defecto `paths-filter`, un filtro casa si **alguno**
+            # de sus patrones casa — y un patrón negado casa con todo lo que
+            # esté fuera de lo negado. O sea que `docs/algo.md` casaba con
+            # `!desktop/src-tauri/**` y ponía `desktop = true`: un PR de solo
+            # documentación arrancaba el paquete entero de escritorio (Desktop
+            # Core, build de macOS, 4 shards de smoke y 2 de integración,
+            # ~25 min). Los filtros `web` y `mobile` no llevan negación y por
+            # eso sí se quedaban en false; la asimetría delata el fallo.
+            #
+            # Quitar la línea **no cambia nada de lo que sí debe correr**: la
+            # negación nunca excluyó nada, porque `desktop/src-tauri/x.rs`
+            # casa con `desktop/**` de todas formas. Comprobado con picomatch
+            # 4.0.4, el que usa la acción:
+            #
+            #   docs/DECISIONES.md            antes=true   después=false
+            #   desktop/src/app/App.tsx       antes=true   después=true
+            #   desktop/src-tauri/src/lib.rs  antes=true   después=true
+            #   crates/buzz-relay/src/main.rs antes=true   después=false
+            #
+            # El último tampoco cambia qué se ejecuta: ningún job se cierra
+            # sobre `desktop` a solas, todos van con
+            # `desktop || desktop-rust || rust`, y ahí `rust` ya es true.
             desktop:
               - 'scripts/model-capabilities.json'
               - 'scripts/normative-corpus.json'
               - 'desktop/**'
-              - '!desktop/src-tauri/**'
               - 'pnpm-lock.yaml'
             desktop-rust:
               - 'desktop/src-tauri/**'
