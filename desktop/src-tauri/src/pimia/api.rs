@@ -381,8 +381,8 @@ fn retry_delay_ms(retry_after: Option<u64>, attempt: u32) -> u64 {
 ///
 /// ⚠️ **El guard de la API no manda `missing_scope`.** Deniega con el cuerpo
 /// `{"message": "Token lacks the invoices:write scope"}` y nada más
-/// (`EnforceApiTokenScopes::handle` en factSaas; comprobado: no hay un solo
-/// `missing_scope` en todo `app/`). Sin este rescate, `missingScope` llegaba
+/// (así lo emite el guard de scopes del núcleo; comprobado: no hay un solo
+/// `missing_scope` en toda su base de código). Sin este rescate, `missingScope` llegaba
 /// siempre vacío al frontend y `PimiaErrorState` nunca llegaba a ofrecer
 /// «Volver a autorizar», que es justo la única salida de un scope que falta.
 ///
@@ -456,7 +456,7 @@ mod tests {
 
     #[test]
     fn path_prefix_is_optional_and_never_doubled() {
-        let base = "https://sdkdemo.taskai.work";
+        let base = "https://demo.example.com";
         for path in [
             "/customers",
             "customers",
@@ -465,7 +465,7 @@ mod tests {
         ] {
             assert_eq!(
                 build_url(base, path, None).unwrap().as_str(),
-                "https://sdkdemo.taskai.work/api/v1/customers",
+                "https://demo.example.com/api/v1/customers",
                 "ruta {path}"
             );
         }
@@ -474,7 +474,7 @@ mod tests {
     #[test]
     fn query_drops_nulls_repeats_arrays_and_is_ordered() {
         let url = build_url(
-            "https://sdkdemo.taskai.work",
+            "https://demo.example.com",
             "/customers",
             Some(&query(&[
                 ("page", serde_json::json!(2)),

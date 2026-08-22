@@ -376,10 +376,10 @@ mod tests {
 
     fn metadata(scopes: Option<Vec<&str>>) -> AuthorizationServerMetadata {
         AuthorizationServerMetadata {
-            authorization_endpoint: "https://sdkdemo.taskai.work/oauth/authorize".to_string(),
-            token_endpoint: "https://sdkdemo.taskai.work/oauth/token".to_string(),
-            registration_endpoint: Some("https://sdkdemo.taskai.work/oauth/register".to_string()),
-            revocation_endpoint: Some("https://sdkdemo.taskai.work/oauth/revoke".to_string()),
+            authorization_endpoint: "https://demo.example.com/oauth/authorize".to_string(),
+            token_endpoint: "https://demo.example.com/oauth/token".to_string(),
+            registration_endpoint: Some("https://demo.example.com/oauth/register".to_string()),
+            revocation_endpoint: Some("https://demo.example.com/oauth/revoke".to_string()),
             scopes_supported: scopes
                 .map(|list| list.into_iter().map(str::to_string).collect::<Vec<_>>()),
         }

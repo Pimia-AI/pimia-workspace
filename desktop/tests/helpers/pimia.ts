@@ -40,12 +40,17 @@ function dueAmount(cents: number): string {
   return cents.toFixed(2);
 }
 
-// El host es deliberadamente genérico: el repo es público y el nombre de un
-// tenant real revela una relación comercial sin aportar nada a la prueba.
+// El host es un placeholder de documentación (RFC 2606), no un dominio que
+// exista: el repo es público y el nombre de un tenant real revela una relación
+// comercial sin aportar nada a la prueba. Cada quien configura el suyo al
+// conectar; el mock se puede apuntar a otro con `PIMIA_MOCK_TENANT_HOST`.
+const MOCK_TENANT_HOST =
+  process.env.PIMIA_MOCK_TENANT_HOST ?? "demo.example.com";
+
 export const PIMIA_MOCK_TENANT = {
   id: "tenant-demo",
-  baseUrl: "https://demo.taskai.work",
-  label: "demo.taskai.work",
+  baseUrl: `https://${MOCK_TENANT_HOST}`,
+  label: MOCK_TENANT_HOST,
   scopes: [
     "customers:read",
     "estimates:read",
@@ -985,7 +990,7 @@ export async function installPimiaMock(
             if (action === "send") {
               // Como el servidor: valida lo que exige `SendDocumentMailRequest`
               // —y **`from` no está**, porque lo pone la instancia y el que
-              // mande un cliente se ignora (factSaas #314/#315)—, pasa el
+              // mande un cliente se ignora—, pasa el
               // borrador a SENT y ENCOLA el correo. El 200 significa «aceptado
               // para enviar», no «entregado».
               const faltan = ["subject", "body", "to"].filter(
@@ -1024,7 +1029,7 @@ export async function installPimiaMock(
             }
 
             // El guard deniega con `message` y NADA más: no existe un campo
-            // `missing_scope` en toda la API (comprobado en factSaas). El
+            // `missing_scope` en toda la API (comprobado en el núcleo). El
             // scope se rescata del texto en el puente Rust.
             if (opts.staleGrant) {
               return {
