@@ -1136,3 +1136,46 @@ son la única divergencia en ellos: si un merge trae cambios en la cabecera de
 esos jobs, conservar el gate. Y si algún día upstream mete el
 `create || edit` idempotente en `sprig.yml` —es un fallo legítimo suyo, no
 nuestro—, tomarlo sin problema: el gate lo sigue apagando aquí.
+
+### 2026-08-22 — Sync a `desktop-v0.5.18`: la barra lateral de upstream se rehizo
+
+Merge de sincronización de nueve releases de golpe (0.5.9 → 0.5.18, **174
+commits**). El ciclo no se había corrido desde el 08-11, y esto es exactamente
+lo que la sección «La estrategia» avisa que pasa: no fueron 4 ficheros en
+conflicto sino **19**, y tres de ellos obligaron a reescribir la forma de una
+divergencia. Se anota aquí, y no solo en el PR, por eso.
+
+**Lo que upstream rediseñó y cómo quedó la divergencia:**
+
+| Divergencia | Antes | Después del merge |
+|---|---|---|
+| **Dos barras** (`AppShell.tsx`) | `PimiaSidebar` a la izquierda, `AppSidebar` a la derecha con `side="right"` | igual, pero dentro de la estructura nueva de upstream: `AppWorkflowEditorOverlayProvider` envuelve todo y `AppShellChannelSurface` va dentro de `TerminalContextOverrideProvider`. La barra de Buzz se movió a *después* de la superficie otra vez |
+| **Props de `AppSidebar`** | tipo en línea en `AppSidebar.tsx`, con `selectedView: AppView` importado para no repetir la unión | upstream extrajo el tipo a `AppSidebar.types.ts`. Las dos divergencias (`selectedView: AppView` y `side?: "left" \| "right"`) se mudaron ahí |
+| **El menú navega solo** (`AppSidebarPrimaryMenu`) | `useAppNavigation()` en vez de `onSelectX` del shell | se conserva. Upstream pasó a cablear `onSelectAgents/Projects/Pulse/Workflows` desde `AppShell`; aquí siguen resolviéndose dentro. Sí entra `projectsOverviewActive`, que es dato y no callback |
+| **Disparador de la barra a la derecha** (`AppTopChrome`) | iconos `PanelRightClose/Open`, disparador al final de la fila | se conserva. Upstream introdujo `DrawerPanelIcon`, que asume barra a la izquierda: no se usa aquí. El `div` portal `#app-top-chrome-content` de upstream entra, y el disparador va detrás |
+| **Despeje de los semáforos** (`AppTopChrome`) | `pl-[80px]` siempre | igual. Upstream lo condiciona a `hasCommunityRail` porque su rail está a la izquierda; el nuestro está a la derecha, así que `AppTopChrome` **no recibe** esa prop |
+| **Provider de barra por «scope»** (`sidebar-provider.tsx`) | extraído de `sidebar.tsx` para poder montar dos barras | se conserva. Se trajo de upstream la constante `MOBILE_ACTION_HIT_AREA`, que vivía en el bloque que aquí no existe |
+| **`dragSidebarRail`** | en `tests/helpers/sidebar.ts`, parametrizado por lado | se conserva; la copia local que upstream volvió a meter en `sidebar.spec.ts` se descarta, y su test nuevo entra |
+| **`deep_link.rs` y `lib.rs`** | `install()` + el brazo `oauth` de Pimia | upstream renombró `install` → `install_deep_link_handlers` y le añadió el arranque en frío de Windows/Linux. **`install()` era código de upstream, no nuestro**: se toma el suyo. El brazo `oauth` y los siete comandos `pimia_*` siguen |
+
+**Los de regla fija**, sin sorpresas: `tauri.conf.json` (identidad nuestra,
+versión suya), `package.json` (versión suya; nuestro `check` con
+`check:file-sizes` y `check:pimia-boundary`), `Cargo.toml`/`Cargo.lock`
+(versión), `pnpm-lock.yaml` (regenerado), `CHANGELOG.md` y
+`.release/desktop-candidate.json` (bookkeeping suyo), `ci.yml` (auto-mergeado;
+el recorte de plataformas intacto), `AGENTS.md` (las dos secciones conviven).
+
+**`deny.toml`: la divergencia desaparece.** Ignorábamos `RUSTSEC-2026-0243`
+(`nostr-relay-pool` sin mantenimiento) porque `mesh-llm` fijaba `nostr-sdk
+0.44.1`. Upstream ya va en **0.45.1** y la crate no está en el lock: la entrada
+sobraba y se toma el `deny.toml` de upstream tal cual.
+
+**Y es lo que cura el job Security**, que llevaba rojo en `main` desde el
+2026-08-19 por dos vulnerabilidades que solo se arreglan actualizando:
+`RUSTSEC-2026-0258` (`h2` 0.4.14 → **0.4.16**, DATA frames vacíos sin límite) y
+`RUSTSEC-2026-0257` (`webbrowser` 1.2.1 → **1.2.4**, inyección de argumentos por
+`BROWSER` en Unix). Ninguna era de Pimia: eran deriva por no sincronizar.
+
+**La lección, que ya estaba escrita y no se siguió:** la cadencia es «cada
+release, o semanal». Nueve releases de retraso convirtieron un merge mecánico en
+uno que obliga a reescribir divergencias. La próxima vez, antes.

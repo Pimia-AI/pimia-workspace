@@ -24,7 +24,9 @@ import { MESSAGE_MARKDOWN_CLASS } from "@/shared/ui/mentionChip";
 
 import {
   MentionHighlightExtension,
-  mentionHighlightKey,
+  reassertMentionCaretAfterFocus,
+  settleAutocompleteMentionInsert,
+  syncMentionHighlightFromProps,
 } from "./mentionHighlightExtension";
 import { CUSTOM_EMOJI_NODE_NAME } from "./customEmojiNode";
 import { useComposerCustomEmoji } from "./useComposerCustomEmoji";
@@ -38,6 +40,9 @@ import {
   insertNewlineInCodeBlock,
 } from "./codeBlockExtensions";
 import { SpoilerMark } from "./spoilerMark";
+import { createComposerLinkPasteHandler } from "./composerMessageLinkNode";
+import type { ComposerMessageLinkChannel } from "./useComposerMessageLinks";
+import { useComposerMessageLinks } from "./useComposerMessageLinks";
 
 function hardBreakLineBounds($from: ResolvedPos) {
   const parentStart = $from.start();
@@ -83,6 +88,7 @@ export type RichTextEditorOptions = {
   mentionNames?: string[];
   agentMentionNames?: string[];
   channelNames?: string[];
+  messageLinkChannels?: readonly ComposerMessageLinkChannel[];
   /** Known custom-emoji set; used to render `:shortcode:` inline as images. */
   customEmoji?: CustomEmoji[];
   /** Called on plain Enter (submit). Handled inside Tiptap's extension system
@@ -135,11 +141,6 @@ function shouldAppendSpaceAfterPaste(text: string): boolean {
   const trimmedEnd = text.trimEnd();
   if (!trimmedEnd || trimmedEnd.length !== text.length) return false;
   return PASTED_LINK_AT_END_RE.test(trimmedEnd);
-}
-
-function unwrapExactHttpLink(text: string): string | null {
-  const match = /^(?:<(https?:\/\/[^\s<>]+)>|(https?:\/\/\S+))$/i.exec(text);
-  return match?.[1] ?? match?.[2] ?? null;
 }
 
 const LinkPasteTrailingSpace = Extension.create({
@@ -206,6 +207,7 @@ export function useRichTextEditor({
   mentionNames,
   agentMentionNames,
   channelNames,
+  messageLinkChannels,
   customEmoji,
   onSubmit,
   onEditLastOwnMessage,
@@ -238,6 +240,7 @@ export function useRichTextEditor({
   // Custom-emoji atom node wiring (config + src re-resolve). Kept in a sibling
   // hook so this file stays focused on generic editor setup.
   const customEmojiWiring = useComposerCustomEmoji(customEmoji);
+  const messageLinkWiring = useComposerMessageLinks(messageLinkChannels);
 
   const editor = useEditor(
     {
@@ -462,6 +465,7 @@ export function useRichTextEditor({
         SpoilerMark,
         MentionHighlightExtension,
         customEmojiWiring.extension,
+        messageLinkWiring.extension,
         Placeholder.configure({
           placeholder: () => placeholderRef.current ?? "Write a message…",
         }),
@@ -495,39 +499,20 @@ export function useRichTextEditor({
       ],
       editorProps: {
         handleDOMEvents: {
-          paste: (view, event) => {
-            const clipboard = (event as ClipboardEvent).clipboardData;
-            if (
-              parseSnapshotClipboardHtml(clipboard?.getData("text/html") ?? "")
+          paste: (view, event) =>
+            parseSnapshotClipboardHtml(
+              (event as ClipboardEvent).clipboardData?.getData("text/html") ??
+                "",
             )
-              return false;
-            const url = unwrapExactHttpLink(
-              clipboard?.getData("text/plain") ?? "",
-            );
-            if (!url) return false;
-            const link = view.state.schema.marks.link;
-            if (!link) return false;
-            const { from, to } = view.state.selection;
-            let transaction = view.state.tr.replaceRangeWith(
-              from,
-              to,
-              view.state.schema.text(url, [link.create({ href: url })]),
-            );
-            const end = transaction.mapping.map(to);
-            transaction = transaction.insertText(" ", end);
-            transaction = transaction.removeMark(end, end + 1, link);
-            transaction = transaction.setSelection(
-              TextSelection.create(transaction.doc, end + 1),
-            );
-            view.dispatch(transaction.setStoredMarks([]).scrollIntoView());
-            event.preventDefault();
-            return true;
-          },
+              ? false
+              : createComposerLinkPasteHandler(
+                  messageLinkWiring.resolveChannelName,
+                )(view, event as ClipboardEvent),
         },
         attributes: {
           autocapitalize: "none",
           autocorrect: "off",
-          class: `${MESSAGE_MARKDOWN_CLASS} min-h-0 resize-none overflow-y-hidden border-0 bg-transparent px-0 py-0 text-sm leading-5 text-foreground shadow-none focus-visible:ring-0 caret-foreground outline-hidden max-w-none`,
+          class: `${MESSAGE_MARKDOWN_CLASS} min-h-0 resize-none overflow-y-hidden border-0 bg-transparent px-0 py-0 text-message font-normal tracking-normal text-foreground shadow-none focus-visible:ring-0 caret-foreground outline-hidden max-w-none`,
           "data-testid": "message-input",
           spellcheck: "true",
         },
@@ -705,24 +690,15 @@ export function useRichTextEditor({
   }, [editor, placeholder]);
 
   // Keep mention/channel-highlight decorations in sync with known names.
-  // NOTE: We use `editor.storage.mentionHighlight` (the mutable storage object
-  // shared with the ProseMirror plugin closure) rather than finding the
-  // extension instance via extensionManager — the instance's `.storage` getter
-  // returns a fresh spread-copy on every access, so mutations are silently lost.
+  // Mutate `editor.storage.mentionHighlight`; the extension getter copies storage.
   React.useEffect(() => {
     if (!editor) return;
-    // biome-ignore lint/suspicious/noExplicitAny: TipTap's Storage type doesn't include dynamic extension keys
-    const storage = (editor.storage as any).mentionHighlight as
-      | { names: string[]; agentNames: string[]; channelNames: string[] }
-      | undefined;
-    if (storage) {
-      storage.names = mentionNames ?? [];
-      storage.agentNames = agentMentionNames ?? [];
-      storage.channelNames = channelNames ?? [];
-      // Force the plugin to re-decorate by dispatching a metadata transaction.
-      const { tr } = editor.state;
-      editor.view.dispatch(tr.setMeta(mentionHighlightKey, true));
-    }
+    syncMentionHighlightFromProps(
+      editor,
+      mentionNames,
+      agentMentionNames,
+      channelNames,
+    );
   }, [editor, mentionNames, agentMentionNames, channelNames]);
 
   // Custom-emoji set changes: re-resolve the `src` attr on any existing
@@ -731,6 +707,11 @@ export function useRichTextEditor({
     if (!editor) return;
     customEmojiWiring.syncEmojiSrc(editor);
   }, [editor, customEmojiWiring.syncEmojiSrc]);
+
+  React.useEffect(() => {
+    if (!editor) return;
+    messageLinkWiring.syncChannelNames(editor);
+  }, [editor, messageLinkWiring.syncChannelNames]);
 
   const getMarkdown = React.useCallback((): string => {
     if (!editor) return "";
@@ -754,17 +735,26 @@ export function useRichTextEditor({
     [editor],
   );
 
-  const setContentAndFocusEnd = React.useCallback(
-    (markdown: string) => {
+  /**
+   * Replace the editor document with literal plain text and focus its end.
+   *
+   * Unlike markdown `setContent`, this preserves trailing whitespace. The
+   * transaction is marked as programmatic so authored-update observers do not
+   * reconcile against the intermediate post-send restoration.
+   */
+  const restorePlainTextAndFocusEnd = React.useCallback(
+    (text: string) => {
       if (!editor) return;
-      // The caller already synchronizes composer state. Keep this programmatic
-      // restoration out of user-edit observers (autocomplete/reconciliation),
-      // then move selection in the same command chain.
-      editor
-        .chain()
-        .setContent(markdown, { emitUpdate: false })
-        .focus("end")
-        .run();
+      const paragraph = editor.schema.nodes.paragraph.create(
+        null,
+        text ? editor.schema.text(text) : undefined,
+      );
+      const tr = editor.state.tr
+        .replaceWith(0, editor.state.doc.content.size, paragraph)
+        .setMeta("preventUpdate", true);
+      tr.setSelection(TextSelection.atEnd(tr.doc));
+      editor.view.dispatch(tr);
+      editor.view.focus();
     },
     [editor],
   );
@@ -875,8 +865,10 @@ export function useRichTextEditor({
       // "Position N out of range".)
       const cursorPM = tr.mapping.map(toPM);
       tr.setSelection(TextSelection.create(tr.doc, cursorPM));
+      settleAutocompleteMentionInsert(editor, tr, text);
       editor.view.dispatch(tr);
       editor.view.focus();
+      reassertMentionCaretAfterFocus(editor.view);
     },
     [editor, customEmojiWiring.resolveUrl],
   );
@@ -962,7 +954,7 @@ export function useRichTextEditor({
     isEmpty,
     clearContent,
     setContent,
-    setContentAndFocusEnd,
+    restorePlainTextAndFocusEnd,
     focus,
     focusEnd,
     focusPreserve,

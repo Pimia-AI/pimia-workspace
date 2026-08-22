@@ -299,6 +299,24 @@ pub enum IngestError {
     Internal(String),
 }
 
+/// Map the durable community write-fence lookup onto the ingest error taxonomy.
+///
+/// An inactive community is an authorization decision and keeps the exact
+/// `restricted:` wire text the ephemeral path uses. A lookup outage is a
+/// server fault and fails closed as `error:`/500 — a Postgres blip can
+/// neither admit a write past the fence nor read as a client mistake.
+fn map_serving_fence_state(active: Result<bool, buzz_db::DbError>) -> Result<(), IngestError> {
+    match active {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(IngestError::Rejected(
+            "restricted: community writes are fenced".into(),
+        )),
+        Err(error) => Err(IngestError::Internal(format!(
+            "error: checking community write fence: {error}"
+        ))),
+    }
+}
+
 fn map_relay_admin_error(error: super::relay_admin::RelayAdminError) -> IngestError {
     use super::relay_admin::RelayAdminError;
     match error {
@@ -706,32 +724,11 @@ pub(crate) async fn resolve_nip10_thread_meta(
     channel_id: Uuid,
     state: &AppState,
 ) -> Result<Option<ThreadMetadataOwned>, String> {
-    let mut root_hex: Option<String> = None;
-    let mut reply_hex: Option<String> = None;
+    let markers = buzz_core::nip10::parse_thread_markers(&event.tags);
 
-    for tag in event.tags.iter() {
-        let parts = tag.as_slice();
-        if parts.len() >= 4 && parts[0] == "e" {
-            let hex_val = &parts[1];
-            let marker = &parts[3];
-            if hex_val.len() == 64 && hex_val.chars().all(|c| c.is_ascii_hexdigit()) {
-                match marker.as_str() {
-                    "root" => root_hex = Some(hex_val.to_string()),
-                    "reply" => reply_hex = Some(hex_val.to_string()),
-                    _ => {}
-                }
-            }
-        }
-    }
-
-    if root_hex.is_none() && reply_hex.is_none() {
-        return Ok(None);
-    }
-
-    let (root_hex, parent_hex) = match (root_hex, reply_hex) {
-        (Some(r), Some(p)) => (r, p),
-        (None, Some(p)) => (p.clone(), p),
-        (Some(_), None) | (None, None) => return Ok(None),
+    let (root_hex, parent_hex) = match markers.resolve() {
+        Some(pair) => pair,
+        None => return Ok(None),
     };
 
     let parent_bytes =
@@ -789,46 +786,18 @@ pub(crate) async fn resolve_nip10_thread_meta(
             (effective_root, root_ts, depth)
         }
         None => {
-            let parent_root = parent_event
-                .event
-                .tags
-                .iter()
-                .find_map(|t| {
-                    let parts = t.as_slice();
-                    if parts.len() >= 4 && parts[0] == "e" && parts[3] == "root" {
-                        hex::decode(&parts[1]).ok().filter(|b| b.len() == 32)
-                    } else {
-                        None
-                    }
-                })
-                .or_else(|| {
-                    parent_event.event.tags.iter().find_map(|t| {
-                        let parts = t.as_slice();
-                        if parts.len() >= 4 && parts[0] == "e" && parts[3] == "reply" {
-                            hex::decode(&parts[1]).ok().filter(|b| b.len() == 32)
-                        } else {
-                            None
-                        }
-                    })
-                })
-                .unwrap_or_else(|| parent_bytes.clone());
+            let (parent_root, root_created, depth) = derive_ancestry_from_parent_tags(
+                community_id,
+                &parent_event.event,
+                &parent_bytes,
+                parent_created,
+                state,
+            )
+            .await;
 
             if client_root_bytes != parent_root {
                 return Err("root tag does not match thread ancestry".to_string());
             }
-            let depth = if parent_root == parent_bytes { 1 } else { 2 };
-            let root_created = if parent_root != parent_bytes {
-                if let Ok(Some(root_ev)) =
-                    state.db.get_event_by_id(community_id, &parent_root).await
-                {
-                    chrono::DateTime::from_timestamp(root_ev.event.created_at.as_secs() as i64, 0)
-                        .unwrap_or(parent_created)
-                } else {
-                    parent_created
-                }
-            } else {
-                parent_created
-            };
             (parent_root, root_created, depth)
         }
     };
@@ -852,6 +821,182 @@ pub(crate) async fn resolve_nip10_thread_meta(
         depth,
         broadcast,
     }))
+}
+
+/// Recover a reply's thread ancestry from its *parent's* NIP-10 tags when the
+/// parent has **no** `thread_metadata` row (legacy or not-yet-indexed events).
+///
+/// The parent's markers are first collapsed through `ThreadMarkers::resolve()`:
+/// a `root`+`reply` parent carries its marked root, a `reply`-only parent carries
+/// its reply target as root, and a root-only/malformed/unmarked parent is itself
+/// top-level and its own root. Depth is 1 when the parent is the root and 2
+/// otherwise — a reply to a nested-but-unindexed parent must not be mistaken for
+/// a top-level reply.
+///
+/// Shared by [`resolve_nip10_thread_meta`] (client path) and
+/// [`resolve_relay_reply_thread_meta`] (workflow path) so the two cannot
+/// diverge. Returns `(root_event_id, root_event_created_at, depth)`.
+async fn derive_ancestry_from_parent_tags(
+    community_id: CommunityId,
+    parent_event: &Event,
+    parent_bytes: &[u8],
+    parent_created: chrono::DateTime<Utc>,
+    state: &AppState,
+) -> (Vec<u8>, chrono::DateTime<Utc>, i32) {
+    let marked_ancestor = |id_hex: &str| hex::decode(id_hex).ok().filter(|b| b.len() == 32);
+    let markers = buzz_core::nip10::parse_thread_markers(&parent_event.tags);
+    let parent_root = markers
+        .resolve()
+        .map(|(root, _)| root)
+        .as_deref()
+        .and_then(marked_ancestor)
+        .unwrap_or_else(|| parent_bytes.to_vec());
+
+    if parent_root.as_slice() == parent_bytes {
+        (parent_root, parent_created, 1)
+    } else {
+        let root_created =
+            if let Ok(Some(root_ev)) = state.db.get_event_by_id(community_id, &parent_root).await {
+                chrono::DateTime::from_timestamp(root_ev.event.created_at.as_secs() as i64, 0)
+                    .unwrap_or(parent_created)
+            } else {
+                parent_created
+            };
+        (parent_root, root_created, 2)
+    }
+}
+
+/// Resolved thread ancestry for a relay-built reply (workflow path).
+///
+/// Carries the parent and root identifiers plus the reply's depth, so the
+/// caller can both emit matching NIP-10 `root`/`reply` tags and persist thread
+/// metadata for the signed reply event.
+pub(crate) struct ReplyAncestry {
+    pub parent_event_id: Vec<u8>,
+    pub parent_event_created_at: chrono::DateTime<Utc>,
+    pub root_event_id: Vec<u8>,
+    pub root_event_created_at: chrono::DateTime<Utc>,
+    pub depth: i32,
+}
+
+impl ReplyAncestry {
+    /// Root event ID as lowercase hex, for the NIP-10 `root` tag.
+    pub fn root_hex(&self) -> String {
+        hex::encode(&self.root_event_id)
+    }
+
+    /// Parent event ID as lowercase hex, for the NIP-10 `reply` tag.
+    pub fn parent_hex(&self) -> String {
+        hex::encode(&self.parent_event_id)
+    }
+
+    /// Build the DB thread-metadata params for the signed reply event.
+    pub fn into_thread_meta(
+        self,
+        reply_event_id: Vec<u8>,
+        reply_created_at: chrono::DateTime<Utc>,
+        channel_id: Uuid,
+    ) -> ThreadMetadataOwned {
+        ThreadMetadataOwned {
+            event_id: reply_event_id,
+            event_created_at: reply_created_at,
+            channel_id,
+            parent_event_id: self.parent_event_id,
+            parent_event_created_at: self.parent_event_created_at,
+            root_event_id: self.root_event_id,
+            root_event_created_at: self.root_event_created_at,
+            depth: self.depth,
+            broadcast: false,
+        }
+    }
+}
+
+/// Resolve thread ancestry for a reply built by the relay (workflow path).
+///
+/// Unlike [`resolve_nip10_thread_meta`], which validates client-supplied NIP-10
+/// `e` tags, this derives ancestry from a known `parent_hex` (the triggering
+/// event) and *computes* the correct root and depth. Enforces the same-channel
+/// invariant and the depth limit that the ingest path applies.
+pub(crate) async fn resolve_relay_reply_thread_meta(
+    community_id: CommunityId,
+    parent_hex: &str,
+    channel_id: Uuid,
+    state: &AppState,
+) -> Result<ReplyAncestry, String> {
+    let parent_bytes =
+        hex::decode(parent_hex).map_err(|_| "invalid parent event ID hex".to_string())?;
+
+    let (parent_event_result, parent_meta_result) = tokio::join!(
+        state.db.get_event_by_id(community_id, &parent_bytes),
+        state
+            .db
+            .get_thread_metadata_by_event(community_id, &parent_bytes),
+    );
+
+    let parent_event = parent_event_result
+        .map_err(|e| format!("db error looking up parent: {e}"))?
+        .ok_or_else(|| "reply parent not found".to_string())?;
+
+    match parent_event.channel_id {
+        Some(parent_ch) if parent_ch != channel_id => {
+            return Err("parent event belongs to a different channel".to_string());
+        }
+        None => return Err("parent event has no channel association".to_string()),
+        _ => {}
+    }
+
+    let parent_created =
+        chrono::DateTime::from_timestamp(parent_event.event.created_at.as_secs() as i64, 0)
+            .unwrap_or_else(Utc::now);
+
+    let parent_meta =
+        parent_meta_result.map_err(|e| format!("db error looking up thread metadata: {e}"))?;
+
+    // Root = parent's root if the parent is itself a reply, else the parent.
+    // Depth = parent depth + 1 (a direct reply to a top-level message is depth 1).
+    let (root_bytes, root_created, depth) = match parent_meta {
+        Some(meta) => {
+            let effective_root = meta.root_event_id.unwrap_or_else(|| parent_bytes.clone());
+            let root_ts = if effective_root == parent_bytes {
+                parent_created
+            } else if let Ok(Some(root_ev)) = state
+                .db
+                .get_event_by_id(community_id, &effective_root)
+                .await
+            {
+                chrono::DateTime::from_timestamp(root_ev.event.created_at.as_secs() as i64, 0)
+                    .unwrap_or(parent_created)
+            } else {
+                parent_created
+            };
+            (effective_root, root_ts, meta.depth + 1)
+        }
+        // No metadata row ⇒ recover the parent's ancestry from its own NIP-10
+        // tags. A marked (but not-yet-indexed) nested parent yields depth 2, not
+        // a false top-level depth 1.
+        None => {
+            derive_ancestry_from_parent_tags(
+                community_id,
+                &parent_event.event,
+                &parent_bytes,
+                parent_created,
+                state,
+            )
+            .await
+        }
+    };
+
+    if depth > 100 {
+        return Err("thread depth limit exceeded".to_string());
+    }
+
+    Ok(ReplyAncestry {
+        parent_event_id: parent_bytes,
+        parent_event_created_at: parent_created,
+        root_event_id: root_bytes,
+        root_event_created_at: root_created,
+        depth,
+    })
 }
 
 /// Count all `e` tags regardless of content validity.
@@ -1931,6 +2076,17 @@ async fn ingest_event_inner(
     let kind_u32 = event_kind_u32(&event);
     debug!(event_id = %event_id_hex, kind = kind_u32, "ingest_event");
 
+    // Durable community write fence: persistent ingest is a DB write the
+    // deletion engine cannot exclude via serving-write leases (those cover
+    // external side effects only), so the shared WS/HTTP seam must refuse
+    // writes once the community leaves the active lifecycle state. Row churn
+    // inside the remaining race window is swept by the destructive DB stage.
+    map_serving_fence_state(
+        buzz_deletion::store(&state.db)
+            .is_serving_active(tenant.community())
+            .await,
+    )?;
+
     if kind_u32 == KIND_AUTH {
         return Err(IngestError::Rejected(
             "invalid: AUTH events cannot be submitted".into(),
@@ -2837,24 +2993,29 @@ async fn ingest_event_inner(
         };
 
         let pubkey_hex = auth.pubkey().to_hex();
-        // Spec WriteInsert (line 514) / WriteDuplicate (line 606): emit
-        // the abstract write action. The persist API returns
-        // `was_inserted` (true → Insert, false → Duplicate). This branch
-        // is the reaction path; channel_id is always Some here, so
-        // WriteInsertGlobal does not apply.
+        // Spec WriteInsert (line 514) / WriteDuplicate (line 606) /
+        // WriteInsertGlobal (line 559): emit the abstract write action. The
+        // persist API returns `was_inserted` (true → Insert/Global, false →
+        // Duplicate). Reactions on project events (issue/PR roots and their
+        // comments) carry no `h` tag, so `channel_id` can be `None` here —
+        // mirror the message write's three-way split instead of asserting a
+        // channel, which panicked the ingest worker on those events.
         let claimed = claimed_community_from_event(&event);
-        let action = if was_inserted {
-            TraceAction::WriteInsert {
+        let action = match (channel_id, was_inserted) {
+            (Some(ch), true) => TraceAction::WriteInsert {
                 msg_id: msg_id_label(event.id.as_bytes()),
-                channel: channel_label(channel_id.expect("reaction path has channel")),
+                channel: channel_label(ch),
                 claimed_community: claimed,
-            }
-        } else {
-            TraceAction::WriteDuplicate {
+            },
+            (Some(ch), false) => TraceAction::WriteDuplicate {
                 msg_id: msg_id_label(event.id.as_bytes()),
-                channel: channel_label(channel_id.expect("reaction path has channel")),
+                channel: channel_label(ch),
                 claimed_community: claimed,
-            }
+            },
+            (None, _) => TraceAction::WriteInsertGlobal {
+                msg_id: msg_id_label(event.id.as_bytes()),
+                claimed_community: claimed,
+            },
         };
         emit(tracer, action, state_for_request(tenant, auth.pubkey()));
         dispatch_persistent_event(
@@ -3163,6 +3324,123 @@ mod tests {
             other => {
                 panic!("restriction DB failure must map to Internal (HTTP 500), got {other:?}")
             }
+        }
+    }
+
+    /// An active community passes the durable write fence untouched.
+    #[test]
+    fn serving_fence_active_community_admits_write() {
+        assert!(map_serving_fence_state(Ok(true)).is_ok());
+    }
+
+    /// A fenced/tombstoned/archived community is an authorization decision:
+    /// `restricted:` and (via `bridge.rs`) HTTP 400 — with the exact wire text
+    /// the ephemeral WS path uses, so clients see one refusal vocabulary.
+    #[test]
+    fn serving_fence_inactive_community_maps_to_restricted() {
+        match map_serving_fence_state(Ok(false)) {
+            Err(IngestError::Rejected(msg)) => {
+                assert_eq!(msg, "restricted: community writes are fenced");
+            }
+            other => panic!("fenced community must map to Rejected, got {other:?}"),
+        }
+    }
+
+    /// A fence-lookup outage is a server fault and must fail closed as
+    /// `error:`/500 — a Postgres blip can neither admit a write past the
+    /// fence nor be reported to an innocent client as a bad request.
+    #[test]
+    fn serving_fence_lookup_outage_fails_closed_as_internal() {
+        let outage = buzz_db::DbError::Sqlx(sqlx::Error::PoolTimedOut);
+        match map_serving_fence_state(Err(outage)) {
+            Err(IngestError::Internal(msg)) => {
+                assert!(
+                    msg.starts_with("error: "),
+                    "fence outages need the `error:` NIP-01 prefix, got {msg:?}"
+                );
+            }
+            other => panic!("fence lookup failure must map to Internal, got {other:?}"),
+        }
+    }
+
+    /// Production-path regression: the exact predicate `ingest_event_inner`
+    /// consults must admit writes while a community is active and refuse them
+    /// once the community deletion lifecycle fences it.
+    #[tokio::test]
+    #[ignore = "requires Postgres"]
+    async fn ingest_write_fence_follows_community_deletion_lifecycle() {
+        use buzz_db::deletion::{
+            FrozenInventory, KeyStreamDigest, PrefixManifest, StorageManifest,
+            DEFAULT_LEASE_DURATION,
+        };
+
+        let url = std::env::var("BUZZ_TEST_DATABASE_URL")
+            .or_else(|_| std::env::var("DATABASE_URL"))
+            .unwrap_or_else(|_| "postgres://buzz:buzz_dev@localhost:5432/buzz".to_string()); // sadscan:disable np.postgres.1
+        let pool = sqlx::PgPool::connect(&url).await.expect("connect test DB");
+        let db = buzz_db::Db::from_pool(pool);
+        db.migrate().await.expect("migrate test DB");
+        let store = buzz_deletion::store(&db);
+
+        let host = format!("lane3-fence-{}.example", Uuid::new_v4().simple());
+        let community = db
+            .ensure_configured_community(&host)
+            .await
+            .expect("community")
+            .id;
+
+        assert!(
+            map_serving_fence_state(store.is_serving_active(community).await).is_ok(),
+            "active community must admit persistent ingest"
+        );
+
+        let submitted = store
+            .submit(
+                &host,
+                "test-operator",
+                Some("lane3 ingest fence regression"),
+            )
+            .await
+            .expect("submit");
+        let inventory = FrozenInventory {
+            schema: store
+                .inventory_schema(community)
+                .await
+                .expect("schema inventory"),
+            storage: StorageManifest {
+                version: 4,
+                prefixes: buzz_media::tenant_prefixes(*community.as_uuid())
+                    .into_iter()
+                    .map(|prefix| PrefixManifest {
+                        prefix,
+                        object_count: 0,
+                        total_bytes: 0,
+                        keys_digest: KeyStreamDigest::new().finish().0,
+                    })
+                    .collect(),
+            },
+        };
+        let request = store
+            .freeze_inventory(submitted.id, &inventory)
+            .await
+            .expect("freeze inventory");
+        store
+            .approve(request.id, "approver", None)
+            .await
+            .expect("approve");
+        let claim = store
+            .claim_specific(request.id, "executor", DEFAULT_LEASE_DURATION)
+            .await
+            .expect("claim")
+            .expect("won claim");
+        store.begin_quiescing(&claim.lease).await.expect("quiesce");
+        store.fence(&claim.lease).await.expect("fence");
+
+        match map_serving_fence_state(store.is_serving_active(community).await) {
+            Err(IngestError::Rejected(msg)) => {
+                assert_eq!(msg, "restricted: community writes are fenced");
+            }
+            other => panic!("fenced community must refuse persistent ingest, got {other:?}"),
         }
     }
 
