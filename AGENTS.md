@@ -6,6 +6,16 @@ code style, PR process, architecture), see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
+## Pimia: decisiones compartidas
+
+Este fork aloja el ERP de Pimia (`desktop/src/features/pimia/`). Antes de
+tocarlo, lee [`docs/DECISIONES.md`](docs/DECISIONES.md): las decisiones de
+arquitectura del 2026-08-22, idénticas en todos los repos del ecosistema. Entre
+ellas, que las vistas del ERP viven en pimia-web-shadcn y aquí están
+congeladas hasta su fase.
+
+---
+
 ## Ecosystem
 
 Buzz spans five repos. This one (`block/buzz`) is the OSS source for the relay, desktop, mobile, and CLI. The others handle internal builds and deployment:
