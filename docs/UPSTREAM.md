@@ -1188,6 +1188,28 @@ el caso de libro de la entrada «El coste horizontal de la segunda barra»:
 
 Los tres verificados en local contra el árbol mergeado: 10 + 43 tests en verde.
 
+**Y tres más en la segunda vuelta de CI**, del mismo linaje salvo el primero:
+
+| Qué falló | Causa | Arreglo |
+|---|---|---|
+| `composer-tooltip-dismiss.spec.ts`, los 4 tests | **el que de verdad importa**: `shared/ui/sidebar-provider.tsx` es un fork del `sidebar.tsx` de la 0.5.9, que envolvía en `<TooltipProvider delayDuration={0}>`. Upstream lo quitó en la 0.5.18 y estrenó specs que dependen del dwell por defecto. Nuestro fork se quedó con el `0` | quitar `delayDuration={0}` — es un cambio de upstream que el fork se había perdido, no una divergencia |
+| `channel-activity-popover.spec.ts:492` | el test aparta el cursor a un punto fijo, `(900, 680)`. Con la barra de Buzz a la derecha, el popover de actividad se abre hacia la **izquierda** y ese punto cae **dentro** de él: el hover no se soltaba nunca | apartarlo a `chat-title`, que está arriba a la izquierda en los dos anfitriones |
+| `project-commit-detail.spec.ts:507` | `locator('[data-sidebar="content"]')` casa con **dos** elementos y el modo estricto aborta | acotar a `app-sidebar` |
+
+⚠️ **La lección del `delayDuration`, que vale para todo fork de un fichero de
+upstream:** un conflicto de merge avisa de lo que cambia en el fichero
+original; un fichero **extraído** no genera conflicto nunca y se queda atrás en
+silencio. Tras cada sync conviene diffear a mano `sidebar-provider.tsx` contra
+el bloque equivalente del `sidebar.tsx` de upstream:
+
+```bash
+git show desktop-vX.Y.Z:desktop/src/shared/ui/sidebar.tsx | sed -n '/^const SIDEBAR_COOKIE/,/^SidebarProvider.displayName/p'
+```
+
+`onboarding-agent-defaults.spec.ts:908`, `persistent-agent-audience.spec.ts` y
+`huddle-transcription.spec.ts:759` salieron **flaky** (pasan al reintentar), y
+son código y tests de upstream sin divergencia nuestra por medio. No se tocan.
+
 **La lección, que ya estaba escrita y no se siguió:** la cadencia es «cada
 release, o semanal». Nueve releases de retraso convirtieron un merge mecánico en
 uno que obliga a reescribir divergencias — y a adaptar specs nuevos que nunca

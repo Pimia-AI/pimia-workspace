@@ -503,7 +503,12 @@ test("multi-repository projects switch the active repository", async ({
   await projectRow.click();
   await expect(projectRow).toHaveAttribute("aria-expanded", "false");
   await page.getByTestId("channel-general").click();
-  const sidebarScroller = page.locator('[data-sidebar="content"]');
+  // Divergencia Pimia: hay dos barras, así que `[data-sidebar="content"]` sin
+  // acotar casa con dos elementos y el modo estricto aborta. La que este test
+  // conduce es la de Buzz.
+  const sidebarScroller = page
+    .getByTestId("app-sidebar")
+    .locator('[data-sidebar="content"]');
   const anchoredScrollTop = await sidebarScroller.evaluate((element) => {
     element.scrollTop = Math.min(
       20,
