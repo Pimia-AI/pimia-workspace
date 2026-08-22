@@ -1775,7 +1775,12 @@ test("project overview presents collapsible context beside grouped activity", as
   expect(Math.abs((searchBox?.y ?? 0) - (firstTabBox?.y ?? 0))).toBeLessThan(8);
   expect(tabMenuBox?.y ?? 0).toBeLessThan(introBox?.y ?? 0);
   expect(introBox?.y ?? 0).toBeLessThan(feedBox?.y ?? 0);
-  expect(feedBox?.width ?? 0).toBeGreaterThan(600);
+  // Divergencia Pimia, pura aritmética: con la barra del ERP a la izquierda el
+  // contenido paga 48 px más de cromo (plegada a iconos, que es como está a
+  // 1280), así que el feed mide 593 donde upstream mide ~641. El umbral baja
+  // los mismos 48 px y conserva el margen que tenía. Ver
+  // `docs/UPSTREAM.md` § «El coste horizontal de la segunda barra».
+  expect(feedBox?.width ?? 0).toBeGreaterThan(550);
   expect(feedBox?.width ?? 0).toBeLessThan((contentPodBox?.width ?? 0) - 32);
   const feedCenter = (feedBox?.x ?? 0) + (feedBox?.width ?? 0) / 2;
   const contentCenter =
