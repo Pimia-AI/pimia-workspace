@@ -763,14 +763,19 @@ test("projects v3 workspace screenshot states", async ({ page }) => {
     (attachedContentSurfaceBounds?.height ?? 0) -
       (projectContentPodBounds?.height ?? 0),
   ).toBe(9);
-  const viewportSize = page.viewportSize();
+  // Divergencia Pimia: upstream comprueba que el panel principal plegado llega
+  // al borde derecho de la ventana. Aquí no puede: ese borde lo ocupa la barra
+  // de Buzz, que en este fork vive a la derecha. La propiedad que se quería
+  // comprobar —que el panel no deja hueco a su derecha— se mide contra el borde
+  // izquierdo de la barra, que es donde acaba de verdad el área de contenido.
+  const buzzSidebarBounds = await page.getByTestId("app-sidebar").boundingBox();
   expect(collapsedMainPaneBounds).not.toBeNull();
-  expect(viewportSize).not.toBeNull();
+  expect(buzzSidebarBounds).not.toBeNull();
   expect(
     Math.abs(
       (collapsedMainPaneBounds?.x ?? 0) +
         (collapsedMainPaneBounds?.width ?? 0) -
-        (viewportSize?.width ?? 0),
+        (buzzSidebarBounds?.x ?? 0),
     ),
   ).toBeLessThanOrEqual(8);
   await repositoryPanelTab.click();

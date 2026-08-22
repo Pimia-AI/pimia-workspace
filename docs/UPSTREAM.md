@@ -1176,6 +1176,19 @@ sobraba y se toma el `deny.toml` de upstream tal cual.
 `RUSTSEC-2026-0257` (`webbrowser` 1.2.1 → **1.2.4**, inyección de argumentos por
 `BROWSER` en Unix). Ninguna era de Pimia: eran deriva por no sincronizar.
 
+**Tres specs nuevos de upstream que la segunda barra tumbaba.** No salieron en
+los conflictos —son ficheros que aquí no existían— sino en el primer CI, y son
+el caso de libro de la entrada «El coste horizontal de la segunda barra»:
+
+| Spec | Qué asumía | Cómo se arregló |
+|---|---|---|
+| `sidebar-offcanvas-rail.spec.ts` (los 3 temas) | que `[data-sidebar-transition-content]` sin acotar es la superficie de Buzz | la del ERP se pinta antes en el DOM y a 960 px ya está plegada a iconos: no transiciona, y el `transitionrun` no llegaba nunca (30 s de timeout ×3). Se acota a `[data-testid="app-sidebar"] …`, que es el patrón que el propio `sidebar.spec.ts` de upstream ya usa |
+| `project-pr-review.spec.ts:1778` | `feedBox.width > 600` | aritmética: el ERP plegado añade 48 px de cromo, así que el feed mide **593**. El umbral baja los mismos 48 (`> 550`) y conserva el margen |
+| `projects-v3-screenshots.spec.ts:775` | que el panel principal plegado llega al **borde derecho de la ventana** | ese borde lo ocupa la barra de Buzz, que aquí está a la derecha: sobraban 308 px (300 + el margen de 8). Se mide contra el borde izquierdo de `app-sidebar`, que es donde acaba de verdad el contenido |
+
+Los tres verificados en local contra el árbol mergeado: 10 + 43 tests en verde.
+
 **La lección, que ya estaba escrita y no se siguió:** la cadencia es «cada
 release, o semanal». Nueve releases de retraso convirtieron un merge mecánico en
-uno que obliga a reescribir divergencias. La próxima vez, antes.
+uno que obliga a reescribir divergencias — y a adaptar specs nuevos que nunca
+habrían llegado de tres en tres. La próxima vez, antes.
