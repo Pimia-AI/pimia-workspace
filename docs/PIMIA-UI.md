@@ -221,6 +221,15 @@ Dos trampas comprobadas contra la API real:
   **del paginador**; aquel solo vale para «cuántos hay en total». Está aislado
   en `readCompanyCount()` con el aviso puesto.
 
+> 🔬 **Corrección fechada, 2026-08-30 — el mecanismo se queda, las cifras no.**
+> «Contra la API real» no dice contra qué caja, y hay dos con el mismo tenant
+> dentro (dev en `taskai.work`, prod en `pimia.es`), así que **129 y 48 no son
+> atribuibles**: no sirven como línea base de dev ni de nada. Lo que sí aguanta
+> es el impedimento, porque no depende de la instancia — el `count()` aparte
+> está en el controlador del núcleo y se lee en el código. Úsese la regla
+> (`total` del paginador para el pie, `meta.*_total_count` solo para «cuántos
+> hay»), nunca los números. Igual el «129 filas del tenant» de arriba.
+
 ## La réplica de facturas
 
 Las pantallas de facturas (`PimiaInvoicesScreen`, `PimiaInvoiceScreen`,

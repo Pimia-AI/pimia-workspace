@@ -421,6 +421,14 @@ enchufarlo: `lib.rs` (el módulo, el estado gestionado y seis comandos) y
    (verificado contra un tenant de sandbox), así que la app se da de alta sola
    en cada tenant y no hay ningún secreto cableado en un binario que el usuario
    tiene en su disco.
+   🔬 **Remedido el 2026-08-30, y se sostiene.** «Un tenant de sandbox» no es
+   ninguno de los dos entornos del ecosistema —dev es `taskai.work`, prod es
+   `pimia.es`—, así que esta premisa, que sostiene la decisión entera, se había
+   quedado sin caja. Comprobada hoy contra **dev**, que es donde se despliega:
+   `GET .well-known/oauth-authorization-server` de `reformas-vera.taskai.work`
+   trae `registration_endpoint`, su `token_endpoint_auth_methods_supported`
+   incluye `"none"` y `code_challenge_methods_supported` es `["S256"]`. Las
+   tres mitades de la decisión están medidas en el entorno de destino.
 3. **El retorno del navegador va por loopback, con el esquema propio de
    respaldo.** El plan decía «deep-link de vuelta» y el esquema
    `pimia-workspace://oauth/callback` está implementado y registrado — pero
@@ -592,6 +600,22 @@ principal— eran lo que faltaba.
 
 **Lo que se ejercitó**, contra un tenant real (host omitido: el repo es público
 y nombrarlo revela una relación comercial sin aportar nada al relato):
+
+> 🔬 **Acotado el 2026-08-30: no fue dev.** Omitir el host dejó esta sesión sin
+> entorno, y con ella dos residuos sin dueño. Medido hoy: el client
+> `mcp_68ee25ee-…` **no está registrado en la tabla central de clients de dev**
+> (cero filas), y `PRE-000133` no existe en el `reformas-vera` de dev — ni en el
+> de prod, cuya numeración llega a `PRE-000130`. Conclusión: el ejercicio corrió
+> contra **otra caja o contra otro tenant**, y ninguno de los dos residuos vive
+> donde se buscó.
+>
+> Lo que la definición de hecho cierra —que el login persiste al reinicio— es
+> sólido en cualquier caja, así que la Fase 1 no se toca. Lo que queda como
+> deuda es que **un client OAuth público y un presupuesto borrador quedaron
+> sembrados en un sitio que este documento ya no permite identificar**. La regla
+> para la próxima: omitir el host es correcto en un repo público, pero entonces
+> hay que dejar el entorno dicho —«dev», «prod»— aunque el dominio no se
+> escriba. Un residuo sin entorno no se puede limpiar.
 
 | | |
 |---|---|
